@@ -11,6 +11,19 @@ Interne Outreach-Anwendung für den kontrollierten B2B-Funnel über Outlook/Micr
 
 ## Lokal starten
 
+Für einen sicheren lokalen Testbetrieb reicht bei laufendem Docker Desktop:
+
+```bash
+npm ci
+npm run local:start
+```
+
+Dieser Start benötigt weder Merge noch Microsoft-Zugangsdaten. Er startet die lokale Datenbank, wendet fehlende Migrationen an und startet die API ausschließlich auf `127.0.0.1:4310`. Vorhandene Daten bleiben erhalten. Der Simulator und die Versandsperre werden unabhängig von Umgebungswerten erzwungen; Worker und Microsoft-Synchronisierung starten nicht. Ein zufälliger lokaler API-Schlüssel bleibt in der Git-ignorierten Datei `.outreach-data/local-admin-api-key` (Dateirechte `600`) und wird nicht ausgegeben.
+
+`npm run local:status` zeigt in einem zweiten Terminal den geschützten Systemstatus. `http://127.0.0.1:4310/health/ready` ist nur eine technische Statusseite, noch kein Dashboard. Zum Stoppen der API `Ctrl+C`, für die Datenbank `docker compose stop postgres` verwenden (kein Löschen des Datenvolumes).
+
+Für die manuelle Konfiguration (bestehende lokale Dateien **nicht überschreiben**, einen eigenen zufälligen `ADMIN_API_KEY` setzen):
+
 ```bash
 cp .env.example .env
 cp config/microsoft-365.example.json config/microsoft-365.json

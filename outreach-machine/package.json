@@ -7,6 +7,8 @@
     "node": ">=22"
   },
   "scripts": {
+    "local:start": "node --import tsx scripts/local.ts",
+    "local:status": "node --import tsx scripts/local.ts --status",
     "build": "tsc -p tsconfig.json",
     "dev": "node --env-file-if-exists=.env --import tsx --watch src/server.ts",
     "dev:worker": "node --env-file-if-exists=.env --import tsx --watch src/worker-main.ts",
