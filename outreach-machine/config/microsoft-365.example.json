@@ -1,0 +1,10 @@
+{
+  "tenantId": "00000000-0000-4000-8000-000000000001",
+  "mailboxObjectId": "00000000-0000-4000-8000-000000000002",
+  "reportedUserPrincipalName": "outreach@example.org",
+  "senderCandidates": ["outreach@example.org"],
+  "verifiedSenderAddress": null,
+  "adminUserPrincipalName": "setup-admin@example.org",
+  "accessStage": "read_only",
+  "signature": null
+}

@@ -1,0 +1,49 @@
+name: Outreach foundation checks
+
+on:
+  pull_request:
+    paths: ['outreach-machine/**', '.github/workflows/outreach-checks.yml']
+  push:
+    paths: ['outreach-machine/**', '.github/workflows/outreach-checks.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: outreach-machine
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: gordion
+          POSTGRES_PASSWORD: ci-test-only
+          POSTGRES_DB: gordion_outreach_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U gordion -d gordion_outreach_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgres://gordion:ci-test-only@localhost:5432/gordion_outreach_test
+      MAIL_PROVIDER: simulated
+      LIVE_SEND_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: outreach-machine/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run graph:check
+      - run: npm run db:migrate
+      - run: npm run smoke:worker
