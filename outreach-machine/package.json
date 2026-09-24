@@ -19,6 +19,7 @@
     "db:migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
     "graph:check": "node --env-file-if-exists=.env --import tsx scripts/check-microsoft-connection.ts",
     "smoke:worker": "node --env-file-if-exists=.env --import tsx scripts/smoke-worker.ts",
+    "smoke:console": "node --env-file-if-exists=.env --import tsx scripts/smoke-console.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit"

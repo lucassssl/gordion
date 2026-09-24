@@ -38,6 +38,7 @@ async function main() {
     DATABASE_URL: "postgres://gordion:gordion-local-only@127.0.0.1:54329/gordion_outreach",
     ADMIN_API_KEY: key, MAIL_PROVIDER: "simulated", LIVE_SEND_ENABLED: "false",
     GRAPH_ACCESS_STAGE: "read_only",
+    LOCAL_DASHBOARD_ENABLED: "true",
   });
   delete process.env.GRAPH_WEBHOOK_CLIENT_STATE;
   delete process.env.PUBLIC_BASE_URL;
@@ -45,7 +46,7 @@ async function main() {
     stdio: "inherit", timeout: 90_000,
   });
   await import("./migrate.js");
-  console.log(`Local simulator: ${baseUrl}/health/ready – no worker, no mail sending.`);
+  console.log(`Local dashboard: ${baseUrl} – simulator only, no mail sending.`);
   await import("../src/server.js");
 }
 

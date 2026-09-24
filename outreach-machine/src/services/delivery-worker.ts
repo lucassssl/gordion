@@ -142,7 +142,8 @@ export class DeliveryWorker {
       ? error
       : new ProviderError({
           code: "unexpected_provider_error",
-          message: error instanceof Error ? error.message : "Unknown provider error",
+          message: "Unexpected delivery failure; provider outcome requires reconciliation",
+          uncertain: true,
           cause: error,
         });
     if (providerError.uncertain) {

@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Gordion · Outreach</title>
+    <link rel="stylesheet" href="/console.css" />
+    <script src="/console.js" defer></script>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="/">gordion<span>OUTREACH WORKSPACE</span></a>
+      <div class="workspace">
+        G<span>Gordion · Lokal<small>Entwicklung & Vorschau</small></span>
+      </div>
+      <nav aria-label="Hauptnavigation">
+        <button data-view="overview" class="active">
+          01 <span>Übersicht</span></button
+        ><button data-view="contacts">
+          02 <span>Kontakte</span><b id="nav-count">0</b></button
+        ><button data-view="campaigns">03 <span>Kampagnen</span></button
+        ><button data-view="messages">04 <span>Nachrichten</span></button
+        ><button data-view="imports">05 <span>Recherche & Import</span></button>
+      </nav>
+      <div class="side-note">
+        <span class="dot"></span> Lokaler Simulator
+        <p>
+          Keine Nachricht verlässt dieses System. Microsoft-Versand ist
+          deaktiviert.
+        </p>
+      </div>
+    </aside>
+    <main>
+      <header class="topbar">
+        <span>WORKSPACE / <strong id="breadcrumb">Übersicht</strong></span>
+        <div>
+          <span class="pill">Nur lokal</span
+          ><button id="refresh" class="quiet">Aktualisieren ↻</button>
+        </div>
+      </header>
+      <div id="notice" role="status" aria-live="polite" hidden></div>
+      <section id="overview" class="view">
+        <div class="page-title">
+          <div>
+            <p class="eyebrow">GORDION OUTREACH</p>
+            <h1>Vom Kontakt zum Gespräch.</h1>
+            <p>
+              Ein kontrollierter Ablauf. Alle nächsten Schritte an einem Ort.
+            </p>
+          </div>
+          <button class="primary" data-go="imports">
+            Kontakte importieren <span>↗</span>
+          </button>
+        </div>
+        <div class="safety-banner">
+          <span class="safety-icon">✓</span>
+          <div>
+            <strong>Sicher vorbereiten. Noch nicht versenden.</strong>
+            <p>
+              Recherche-Import, Prüfung und Nachrichtenvorschau sind getrennt
+              vom Liveversand.
+            </p>
+          </div>
+          <span class="pill amber">Versand gesperrt</span>
+        </div>
+        <div class="metrics">
+          <article>
+            <span>Kontakte</span><strong id="metric-contacts">—</strong
+            ><small>im angezeigten Bestand</small>
+          </article>
+          <article>
+            <span>Versandgrundlage geprüft</span
+            ><strong id="metric-reviewed">—</strong
+            ><small>mit gültigem Nachweis</small>
+          </article>
+          <article>
+            <span>Nachrichten vorbereitet</span
+            ><strong id="metric-messages">—</strong
+            ><small>noch kein Zustellnachweis</small>
+          </article>
+          <article>
+            <span>Aktiver Liveversand</span><strong>Aus</strong
+            ><small id="pause-state">System wird geprüft</small>
+          </article>
+        </div>
+        <div class="columns">
+          <article class="panel">
+            <div class="panel-heading">
+              <h2>Dein Ablauf</h2>
+              <span class="muted">01 → 05</span>
+            </div>
+            <ol class="flow">
+              <li>
+                <i>1</i>
+                <div>
+                  <strong>Neue Kontakte finden</strong>
+                  <p>Rechercheanbindung noch offen. Keine Suche aktiv.</p>
+                </div>
+                <span class="tag amber">Offen</span>
+              </li>
+              <li>
+                <i>2</i>
+                <div>
+                  <strong>Automatisch importieren</strong>
+                  <p>
+                    Strukturierte Ergebnisse übernehmen, Dubletten und Sperren
+                    prüfen.
+                  </p>
+                </div>
+                <span class="tag">Bereit</span>
+              </li>
+              <li>
+                <i>3</i>
+                <div>
+                  <strong>Versandgrundlage prüfen</strong>
+                  <p>Ein Recherchefund ist keine Einwilligung.</p>
+                </div>
+              </li>
+              <li>
+                <i>4</i>
+                <div>
+                  <strong>Nachrichten vorbereiten</strong>
+                  <p>
+                    Freigegebene Vorlage, Quellen und feste Kampagnenregeln.
+                  </p>
+                </div>
+              </li>
+              <li>
+                <i>5</i>
+                <div>
+                  <strong>Kontrolliert live gehen</strong>
+                  <p>
+                    Erst nach technischen Tests und ausdrücklicher Aktivierung.
+                  </p>
+                </div>
+                <span class="tag amber">Gesperrt</span>
+              </li>
+            </ol>
+          </article>
+          <article class="panel">
+            <div class="panel-heading">
+              <h2>Letzte Aktivitäten</h2>
+              <span class="dot"></span>
+            </div>
+            <div id="activity" class="activity"></div>
+          </article>
+        </div>
+        <article class="panel stop-panel">
+          <div>
+            <h2>Ein Schalter für alle Kampagnen</h2>
+            <p>
+              Die globale Pause blockiert den Versand. Der lokale Modus kann sie
+              nicht aufheben.
+            </p>
+          </div>
+          <button id="pause" class="danger">Alles pausieren</button>
+        </article>
+      </section>
+
+      <section id="contacts" class="view" hidden>
+        <div class="page-title">
+          <div>
+            <p class="eyebrow">KONTAKTBESTAND</p>
+            <h1>Kontakte mit Kontext.</h1>
+            <p>
+              Quellen, Eignung und Versandgrundlage bleiben nachvollziehbar.
+            </p>
+          </div>
+          <button class="primary" data-go="imports">Import öffnen ↗</button>
+        </div>
+        <div class="panel">
+          <div class="filters">
+            <label
+              >Suche<input
+                id="contact-search"
+                type="search"
+                placeholder="Firma, E-Mail oder Rolle" /></label
+            ><label
+              >Status<select id="contact-filter">
+                <option value="all">Alle Kontakte</option>
+                <option value="needs_review">Prüfung offen</option>
+                <option value="eligible">Geprüft</option>
+                <option value="suppressed">Gesperrt</option>
+              </select></label
+            >
+          </div>
+          <p class="muted">
+            Bis zu 300 aktuelle Kontakte. Recherche-Importe werden niemals
+            automatisch als zulässig markiert.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Unternehmen / Kontakt</th>
+                  <th>Rolle / Markt</th>
+                  <th>Quelle</th>
+                  <th>Status</th>
+                  <th>Aktionen</th>
+                </tr>
+              </thead>
+              <tbody id="contacts-body"></tbody>
+            </table>
+          </div>
+          <div id="contacts-empty" class="empty" hidden>
+            <span>◎</span>
+            <h3>Noch keine Kontakte</h3>
+            <p>
+              Starte mit Testdaten oder einem strukturierten Import. Es wurden
+              keine echten Kontakte hinzugefügt.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="campaigns" class="view" hidden>
+        <div class="page-title">
+          <div>
+            <p class="eyebrow">KAMPAGNEN</p>
+            <h1>Regeln einmal festlegen.</h1>
+            <p>
+              Automatische Vorbereitung ist möglich. Automatischer Versand
+              bleibt gesperrt.
+            </p>
+          </div>
+          <button id="new-campaign" class="primary">Neue Kampagne +</button>
+        </div>
+        <div id="campaign-list" class="card-grid"></div>
+      </section>
+
+      <section id="messages" class="view" hidden>
+        <div class="page-title">
+          <div>
+            <p class="eyebrow">NACHRICHTEN</p>
+            <h1>Jede Nachricht nachvollziehbar.</h1>
+            <p>
+              Empfänger und Text werden als unveränderliche Vorschau
+              gespeichert.
+            </p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Empfänger</th>
+                  <th>Betreff / Kampagne</th>
+                  <th>Status</th>
+                  <th>Vorschau</th>
+                </tr>
+              </thead>
+              <tbody id="messages-body"></tbody>
+            </table>
+          </div>
+          <div id="messages-empty" class="empty" hidden>
+            <span>↗</span>
+            <h3>Bereit, wenn deine Kampagne es ist.</h3>
+            <p>
+              Geprüfte Kontakte, eine Vorlage und eine Signatur bilden die
+              Grundlage für die erste Vorschau.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="imports" class="view" hidden>
+        <div class="page-title">
+          <div>
+            <p class="eyebrow">RECHERCHE & IMPORT</p>
+            <h1>Ein Eingang. Kein Listenchaos.</h1>
+            <p>
+              Die Schnittstelle für wiederholbare Rechercheläufe – mit Schutz
+              vor Dubletten.
+            </p>
+          </div>
+          <span class="pill amber">Suche noch nicht verbunden</span>
+        </div>
+        <div class="columns">
+          <article class="panel">
+            <h2>Strukturierte Kontakte importieren</h2>
+            <p>
+              JSON-Datei wählen oder Ergebnisse einfügen. Maximal 100 Kontakte
+              pro Lauf. Dieselbe Lauf-ID ist sicher wiederholbar.
+            </p>
+            <form id="import-form">
+              <label
+                >Importdatei<input
+                  id="import-file"
+                  type="file"
+                  accept=".json,application/json" /></label
+              ><label
+                >Importdaten<textarea
+                  id="import-json"
+                  rows="12"
+                  required
+                  spellcheck="false"
+                  placeholder='{"externalId":"lauf-001","source":"manual","contacts":[…]}'
+                ></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="button" id="sample-import" class="quiet">
+                  Testbeispiel einfügen</button
+                ><button class="primary" type="submit">
+                  Import prüfen & speichern
+                </button>
+              </div>
+            </form>
+            <pre id="import-result" hidden></pre>
+          </article>
+          <article class="panel">
+            <h2>Später ohne manuelle Importe</h2>
+            <p>
+              Ein Rechercheprozess liefert neue Kandidaten direkt an diesen
+              Eingang. Sein eigener Zugang darf nur Kontakte einspielen – nicht
+              freigeben oder versenden.
+            </p>
+            <ul class="checklist">
+              <li>Firma, Domain und Ansprechpartner</li>
+              <li>Quellen mit Prüfdatum und Ausführungsnachweis</li>
+              <li>Abgleich gegen vorhandene Kontakte und Sperrlisten</li>
+              <li>Importierte Nachweise erteilen keine Versandfreigabe</li>
+            </ul>
+            <div class="callout">
+              <strong>Noch zu verbinden</strong>
+              <p>
+                Suchquelle, Suchprofil, Zeitplan und gegebenenfalls API-Zugang.
+                Ein automatischer Suchlauf ist noch nicht eingerichtet.
+              </p>
+            </div>
+            <p class="muted">
+              Technischer Eingang: POST /v1/imports<br />Eine Rechercheanbindung
+              ersetzt keine belegte Versandgrundlage.
+            </p>
+          </article>
+        </div>
+        <article class="panel">
+          <h2>Importverlauf</h2>
+          <div id="import-history" class="activity"></div>
+        </article>
+      </section>
+      <footer>
+        Gordion Outreach · Lokaler Entwicklungsstand<span
+          >Keine Livekampagne · Kein Öffnungstracking</span
+        >
+      </footer>
+    </main>
+
+    <dialog id="review-dialog">
+      <form id="review-form">
+        <div class="dialog-title">
+          <h2>Kontakt prüfen</h2>
+          <button
+            type="button"
+            data-close="review-dialog"
+            aria-label="Schließen"
+          >
+            ×
+          </button>
+        </div>
+        <p id="review-contact"></p>
+        <p id="review-evidence" class="callout"></p>
+        <input id="review-id" type="hidden" /><label
+          >Belegte Versandgrundlage<select id="review-basis">
+            <option value="own_test_address">Eigene Testadresse</option>
+            <option value="consent">
+              Vorliegende ausdrückliche Einwilligung
+            </option>
+            <option value="reviewed_customer_exception">
+              Rechtlich geprüfte Bestandskundenausnahme
+            </option>
+          </select></label
+        ><label
+          >Nachweis / Referenz<textarea
+            id="review-reference"
+            rows="3"
+            minlength="12"
+            required
+            placeholder="Wo ist die Grundlage dokumentiert? Öffentliche E-Mail-Adresse allein reicht nicht."
+          ></textarea></label
+        ><label
+          >Gültig bis<input id="review-expiry" type="date" required /></label
+        ><label class="checkbox"
+          ><input id="review-confirm" type="checkbox" required />Ich habe
+          Firmen-Eignung, Quelle und Versandgrundlage geprüft. Bei „Eigene
+          Testadresse“ gehört die Adresse tatsächlich uns.</label
+        ><button class="primary" type="submit">Prüfung dokumentieren</button>
+      </form>
+    </dialog>
+
+    <dialog id="campaign-dialog">
+      <form id="campaign-form">
+        <div class="dialog-title">
+          <h2>Kampagne vorbereiten</h2>
+          <button
+            type="button"
+            data-close="campaign-dialog"
+            aria-label="Schließen"
+          >
+            ×
+          </button>
+        </div>
+        <label
+          >Name<input
+            name="name"
+            required
+            minlength="3"
+            maxlength="150"
+            placeholder="Zum Beispiel: interner Testlauf"
+        /></label>
+        <div class="form-row">
+          <label
+            >Länder<input
+              name="countries"
+              value="DE"
+              required
+              placeholder="DE, AT, CH" /></label
+          ><label
+            >Neue Kontakte / Tag<input
+              name="initialLimit"
+              type="number"
+              value="5"
+              min="1"
+              max="10"
+              required /></label
+          ><label
+            >Gesamt / Tag<input
+              name="totalLimit"
+              type="number"
+              value="5"
+              min="1"
+              max="15"
+              required
+          /></label>
+        </div>
+        <label
+          >Betreff<input
+            name="subject"
+            required
+            maxlength="255"
+            placeholder="Best Execution bei {{company}}" /></label
+        ><label
+          >Vorlage<textarea
+            name="body"
+            rows="6"
+            required
+            minlength="20"
+            placeholder="Erlaubte Variablen: {{company}}, {{firstName}}, {{evidence}}"
+          ></textarea></label
+        ><label
+          >Geschäftliche Signatur<textarea
+            name="signature"
+            rows="3"
+            required
+            minlength="8"
+            placeholder="Noch offen – bitte finale Signatur hinterlegen."
+          ></textarea></label
+        ><label
+          >Referenz zur Kampagnenprüfung<input
+            name="legalReference"
+            required
+            minlength="10"
+            placeholder="Zum Beispiel: interner Test, ausschließlich eigene Adressen" /></label
+        ><label class="checkbox"
+          ><input type="checkbox" required />Ich gebe diese Vorlage zur
+          Vorbereitung frei. Dies aktiviert keinen Versand.</label
+        ><button class="primary" type="submit">
+          Vorlage freigeben & Kampagne speichern
+        </button>
+      </form>
+    </dialog>
+
+    <dialog id="message-dialog">
+      <div class="dialog-title">
+        <h2>Nachrichtenvorschau</h2>
+        <button
+          type="button"
+          data-close="message-dialog"
+          aria-label="Schließen"
+        >
+          ×
+        </button>
+      </div>
+      <p id="preview-recipient" class="muted"></p>
+      <h3 id="preview-subject"></h3>
+      <pre id="preview-body" class="mail-preview"></pre>
+      <p class="callout">
+        Eine Freigabe speichert diesen genauen Inhalt. Der Versand bleibt im
+        lokalen Modus deaktiviert.
+      </p>
+      <button id="approve-message" class="primary">
+        Diesen Inhalt freigeben
+      </button>
+    </dialog>
+  </body>
+</html>
