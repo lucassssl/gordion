@@ -10,6 +10,7 @@ import { SimulatedMailProvider } from '../src/mail/simulated-provider.js';
 import type { AutopilotMailProvider,DeltaPage,OutboundMessage } from '../src/mail/provider.js';
 import { buildHttpApp } from '../src/http/app.js';
 import { confirmMailboxSend } from '../src/services/mailbox-ledger.js';
+import { senderSignature,saveSenderSignature } from '../src/services/sender-signature.js';
 const url=process.env.DATABASE_URL;if(!url) throw new Error('DATABASE_URL required');
 const parsed=new URL(url);if(!['localhost','127.0.0.1'].includes(parsed.hostname)||!parsed.pathname.endsWith('_test')) throw new Error('Disposable local test database required');
 const sql=createDatabase({DATABASE_URL:url});
@@ -23,6 +24,8 @@ class TestMailbox extends SimulatedMailProvider implements AutopilotMailProvider
   override async getDeltaPage(folder?:string):Promise<DeltaPage> {return {messages:folder==='junkemail'?this.inbound:[],nextLink:null,deltaLink:`test:${folder}`};}
 }
 try {
+  const signature=await senderSignature(sql);
+  const shared=await saveSenderSignature(sql,{revision:signature.revision,signatureText:'Synthetic shared signature only',useLogo:false,actor:'smoke'});
   // This script owns the named disposable test database; never point at the user's database.
   await seedTemplateLibrary(sql);
   const mailbox=randomUUID(),co=randomUUID(),contact=randomUUID();
@@ -52,6 +55,8 @@ try {
   assert.equal((await planAutopilot(sql)).prepared,0,'repeat planner does not duplicate company');
   const [message]=await sql`SELECT m.* FROM messages m JOIN enrollments e ON e.id=m.enrollment_id WHERE e.company_id=${co}`;
   assert.equal(message!.countryRuleId,rule!.id);assert.equal(message!.authorizationId,auth!.id);
+  assert.equal(message!.senderSignatureVersionId,shared!.id);
+  assert.ok(message!.finalBodyText.endsWith(shared!.signatureText));
   await assert.rejects(sql`UPDATE messages SET final_body_text='tampered' WHERE id=${message!.id}`);
   await assert.rejects(sql`UPDATE template_versions SET signature='tampered' WHERE status='approved'`);
   // Nine observed external sends leave one slot across concurrent workers. The same send is reserved at most once.
@@ -65,6 +70,18 @@ try {
   await sql.begin(tx=>confirmMailboxSend(tx,mailbox,message!.id,'recovered-sent',new Date()));
   const [ledgerCount]=await sql`SELECT count(*)::int AS n FROM mailbox_send_ledger WHERE mailbox_connection_id=${mailbox} AND state<>'released'`;
   assert.equal(ledgerCount!.n,10,'recovered observation merges with reservation, exactly once');
+  // A newly prepared follow-up uses the current shared footer, while its
+  // already frozen initial message keeps the previous footer/version.
+  const nextSignature=await saveSenderSignature(sql,{revision:shared!.revision,signatureText:'Updated shared signature for new drafts',useLogo:true,actor:'smoke'});
+  await sql`UPDATE messages SET status='sent_confirmed',sent_confirmed_at=now()-interval '20 days' WHERE id=${message!.id}`;
+  assert.equal((await planAutopilot(sql)).prepared,1);
+  const [followup]=await sql`SELECT * FROM messages WHERE parent_message_id=${message!.id}`;
+  assert.ok(followup!.finalBodyText.endsWith(nextSignature!.signatureText));
+  assert.equal(followup!.senderSignatureVersionId,nextSignature!.id);
+  assert.equal(followup!.logoSha256,nextSignature!.logoSha256);
+  assert.equal(followup!.snapshot.signatureVersionId,nextSignature!.id);
+  const [original]=await sql`SELECT final_body_text,sender_signature_version_id FROM messages WHERE id=${message!.id}`;
+  assert.equal(original!.finalBodyText,message!.finalBodyText);assert.equal(original!.senderSignatureVersionId,shared!.id);
   const provider=new TestMailbox(),sync=new AutopilotSync(sql,provider,mailbox,`sender-${mailbox}@example.test`);
   const guardWorker=new AutopilotDelivery(sql,{...cfg,GRAPH_TENANT_ID:randomUUID(),GRAPH_MAILBOX_OBJECT_ID:randomUUID()},provider,mailbox);
   assert.equal(await guardWorker['guard'](sql,message!,true),false,'final database guard rejects unbound simulator and missing live prerequisites');
@@ -72,7 +89,7 @@ try {
   provider.inbound=[{id:'reply-in-junk',internetMessageId:'<reply@example.org>',conversationId:null,senderAddress:`colleague@${co}.example.org`,subject:'Please unsubscribe',receivedDateTime:new Date().toISOString(),isDraft:false,bodyPreview:'Please unsubscribe'}];
   await sync.tick();
   const [stopped]=await sql`SELECT status FROM enrollments WHERE company_id=${co}`;assert.equal(stopped!.status,'unsubscribed');
-  const [cancelled]=await sql`SELECT status FROM messages WHERE id=${message!.id}`;assert.equal(cancelled!.status,'cancelled');
+  const [cancelled]=await sql`SELECT status FROM messages WHERE id=${followup!.id}`;assert.equal(cancelled!.status,'cancelled');
   const [blocked]=await sql`SELECT id FROM suppression_entries WHERE scope='company' AND normalized_value=${co} AND active`;assert.ok(blocked);
   await sql`INSERT INTO provider_operations(mailbox_connection_id,message_id,operation,correlation_id,status) VALUES(${mailbox},${message!.id},'send',${message!.idempotencyKey},'started')`;
   await reconcileAutopilot(sql,provider,mailbox);

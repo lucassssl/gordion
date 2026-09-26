@@ -15,6 +15,14 @@ describe('Autopilot rendering',()=> {
     expect(result.bodyText.startsWith(template.language==='de'?'Guten Tag,':'Hello,')).toBe(true);
   });
   it('has exactly 16 distinct starting versions',()=>expect(new Set(initialTemplates().map(t=>`${t.categoryId}:${t.language}:${t.step}`)).size).toBe(16));
+  it('uses exactly the same fixed footer once for every language, category and sequence step',()=> {
+    const signature='Mit freundlichen Grüßen,\nExample Sender\nExample Company\nWeb: www.example.org';
+    for(const template of initialTemplates()) {
+      const result=renderAutopilot({firstName:'Alex',name:'Client Ltd'},{...template,signature});
+      expect(result.bodyText.endsWith(signature)).toBe(true);
+      expect(result.bodyText.split(signature)).toHaveLength(2);
+    }
+  });
   it('uses explicit language and EU-only countries',()=>{expect(EU_COUNTRIES).toHaveLength(27);expect(contactLanguage('FR','de')).toBe('de');expect(contactLanguage('AT')).toBe('de');expect(contactLanguage('NL')).toBe('en');expect(()=>contactLanguage('DE','fr')).toThrow();});
   it('never uses raw or wrong-language intros',()=> {
     const t={...initialTemplates()[0]!,signature:'Team'};

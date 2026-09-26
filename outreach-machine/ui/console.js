@@ -466,6 +466,10 @@ function fallbackNote(keys = []) {
     : "Alle verwendeten Angaben vorhanden.";
 }
 function renderCategories() {
+  const signature=data.senderSignature;
+  $('sender-signature-form').elements.signatureText.value=signature.signatureText;
+  $('sender-signature-form').elements.useLogo.checked=signature.useLogo;
+  $('sender-signature-status').textContent=signature.id?`Zentrale Signatur · Version ${signature.version} · gilt für alle neuen Entwürfe.`:'Noch keine zentrale Signatur. Nachrichtenvorbereitung bleibt gesperrt.';
   $("category-list").replaceChildren();
   for (const category of data.categories) {
     const card = el("article", undefined, "panel");
@@ -474,7 +478,7 @@ function renderCategories() {
       el("p", category.subjectTemplate),
       el(
         "small",
-        `${data.contacts.filter((c) => c.categoryId === category.id).length} Kontakte · ${category.signatureText ? "Signatur hinterlegt" : "Signatur fehlt"}`,
+        `${data.contacts.filter((c) => c.categoryId === category.id).length} Kontakte · ${signature.id ? "Zentrale Signatur" : "Zentrale Signatur fehlt"}`,
       ),
       button("Standardmail bearbeiten", () => {
         $("category-id").value = category.id;
@@ -482,8 +486,6 @@ function renderCategories() {
         f.elements.name.value = category.name;
         f.elements.subject.value = category.subjectTemplate;
         f.elements.body.value = category.bodyTemplate;
-        f.elements.signature.value = category.signatureText;
-        f.elements.useLogo.checked = category.useLogo;
         $("category-dialog").showModal();
       }),
     );
@@ -497,8 +499,6 @@ function useCategory() {
   const form = $("campaign-form");
   form.elements.subject.value = category.subjectTemplate;
   form.elements.body.value = category.bodyTemplate;
-  form.elements.signature.value = category.signatureText;
-  form.elements.useLogo.checked = category.useLogo;
 }
 $("new-campaign").onclick = () => {
   $("campaign-form").reset();
@@ -512,7 +512,6 @@ $("category-form").onsubmit = (event) => {
   action(async () => {
     await api(`/v1/categories/${$("category-id").value}`, {
       ...Object.fromEntries(new FormData(event.target)),
-      useLogo: event.target.elements.useLogo.checked,
     });
     $("category-dialog").close();
     await refresh();
@@ -542,7 +541,6 @@ $("campaign-form").onsubmit = (event) => {
     const fields = Object.fromEntries(new FormData(event.target));
     await api("/v1/campaigns", {
       ...fields,
-      useLogo: event.target.elements.useLogo.checked,
       countries: fields.countries
         .split(",")
         .map((x) => x.trim().toUpperCase())
@@ -582,6 +580,7 @@ $('load-more-records').onclick=()=>action(async()=> {
   note(`${data.contacts.length} von ${data.totals.contacts} Kontakten geladen. Die Suche filtert die geladenen Einträge.`);
 });
 const blockerNames={
+  shared_signature_missing:'Die zentrale Absendersignatur fehlt',
   operator_login_not_configured:'Betreiberpasswort noch nicht eingerichtet',runtime_live_send_disabled:'Microsoft-Liveversand ist in der Laufzeit deaktiviert',
   MAILBOX_CONNECTION_ID_required:'Geprüfte Postfachverbindung noch nicht hinterlegt',autopilot_mailbox_not_bound:'Autopilot noch nicht an das geprüfte Postfach gebunden',
   certificate_auth_required:'Zertifikatanmeldung für diesen Betrieb noch nicht eingerichtet',sixteen_templates_not_approved:'Die 16 Sprach-/Sequenzvorlagen sind noch nicht vollständig freigegeben',
@@ -613,7 +612,8 @@ async function refreshAutopilot() {
   const container=$('autopilot-templates');container.replaceChildren();
   const categoryNames={bank:'Banken',broker:'Broker & Wertpapierfirmen',asset_manager:'Asset Manager',general:'Allgemein'};
   for(const t of templates.items) container.append(button(`${categoryNames[t.categoryId]} · ${t.language.toUpperCase()} · ${t.step?'Nachfrage':'Erstmail'} · v${t.version} · ${labels[t.status]||t.status}`,()=> {
-    libraryVersion=t;const f=$('library-form');for(const key of ['subject','body','signature']) f.elements[key].value=t[key];f.elements.useLogo.checked=t.useLogo;
+    libraryVersion=t;const f=$('library-form');for(const key of ['subject','body']) f.elements[key].value=t[key];
+    $('library-signature-preview').textContent=data.senderSignature.signatureText||'Zentrale Signatur noch nicht hinterlegt.';
     $('library-title').textContent=`${t.categoryId} · ${t.language.toUpperCase()} · ${t.step?'Nachfrage':'Erstmail'}`;
     $('library-status').textContent=`Version ${t.version}: ${labels[t.status]||t.status}. Freigabe gilt ausschließlich für den gespeicherten Inhalt.`;
     $('library-approve').disabled=t.status!=='draft';$('library-dialog').showModal();
@@ -623,14 +623,15 @@ async function refreshAutopilot() {
 async function loadExceptions(reset=false) {if(reset) {exceptionOffset=0;$('autopilot-exceptions').replaceChildren();}const page=await api(`/v1/exceptions?limit=50&offset=${exceptionOffset}`);for(const item of page.items) $('autopilot-exceptions').append(el('p',`${item.companyName||'Betrieb'} · ${blockerNames[item.code]||item.code} · ${new Date(item.createdAt).toLocaleDateString('de-DE')}`));exceptionOffset+=page.items.length;$('exceptions-next').disabled=page.items.length<50;}
 async function loadRuns(reset=false) {if(reset) {runOffset=0;$('autopilot-runs').replaceChildren();}const page=await api(`/v1/research/runs?limit=50&offset=${runOffset}`);for(const item of page.items) $('autopilot-runs').append(el('p',`${item.kind} · ${item.status} · ${new Date(item.startedAt).toLocaleString('de-DE')}${item.error?` · ${item.error}`:''}`));runOffset+=page.items.length;$('runs-next').disabled=page.items.length<50;}
 $('exceptions-next').onclick=()=>action(()=>loadExceptions());$('runs-next').onclick=()=>action(()=>loadRuns());
+$('sender-signature-form').onsubmit=event=>{event.preventDefault();action(async()=>{const f=event.target.elements;await api('/v1/sender-signature',{revision:data.senderSignature.revision,signatureText:f.signatureText.value,useLogo:f.useLogo.checked,actor:f.actor.value,confirmation:'SAVE_SHARED_SIGNATURE'});await refresh();note('Zentrale Signatur gespeichert. Alle neuen Entwürfe übernehmen sie; bestehende Nachrichten bleiben unverändert.');});};
 $('operator-login').onsubmit=event=> {event.preventDefault();action(async()=>{await api('/local/operator/login',{password:event.target.elements.password.value});event.target.reset();await refresh();note('Betreiberanmeldung erfolgreich. Versand unverändert.');});};
 $('operator-setup').onsubmit=event=> {event.preventDefault();action(async()=>{const fields=event.target.elements;if(fields.password.value!==fields.repeat.value) throw new Error('Die beiden Passwörter stimmen nicht überein.');await api('/local/operator/setup',{password:fields.password.value,confirmation:'CREATE_LOCAL_OPERATOR'});event.target.reset();await refresh();note('Passwort eingerichtet. Jetzt anmelden; vor dem Schattenbetrieb den lokalen Supervisor neu starten. Keine Versandaktivierung.');});};
 $('autopilot-settings').onsubmit=event=> {event.preventDefault();action(async()=>{const f=event.target.elements;await api('/v1/autopilot/configure',{version:autopilotState.settings.version,mode:f.mode.value,researchEnabled:f.researchEnabled.checked,mailboxConnectionId:f.mailboxConnectionId.value.trim()||null,dailyTarget:Number(f.dailyTarget.value),pilotLimit:Number(f.pilotLimit.value),actor:f.actor.value,confirmation:'SAVE_PAUSED_CONFIGURATION'});await refresh();note('Einstellungen gespeichert. Versand bleibt pausiert.');});};
 $('autopilot-pause').onclick=()=>action(async()=>{await api('/v1/autopilot/pause',{actor:$('autopilot-settings').elements.actor.value,reason:'Manuelle Pause im Dashboard'});await refresh();});
 $('autopilot-activate').onclick=()=>action(async()=>{if(!confirm('Livebetrieb ausdrücklich aktivieren? Geprüfte Nachrichten können anschließend versendet werden.')) return;await api('/v1/autopilot/activate',{version:autopilotState.settings.version,actor:$('autopilot-settings').elements.actor.value,confirmation:'ACTIVATE_LIVE_AUTOPILOT'});await refresh();});
-$('library-form').onsubmit=event=> {event.preventDefault();action(async()=>{const f=event.target.elements;await api('/v1/templates/versions',{categoryId:libraryVersion.categoryId,language:libraryVersion.language,step:libraryVersion.step,subject:f.subject.value,body:f.body.value,signature:f.signature.value,useLogo:f.useLogo.checked});$('library-dialog').close();await refresh();note('Neue Entwurfsversion gespeichert. Noch nicht freigegeben.');});};
+$('library-form').onsubmit=event=> {event.preventDefault();action(async()=>{const f=event.target.elements;await api('/v1/templates/versions',{categoryId:libraryVersion.categoryId,language:libraryVersion.language,step:libraryVersion.step,subject:f.subject.value,body:f.body.value});$('library-dialog').close();await refresh();note('Neue Entwurfsversion gespeichert. Noch nicht freigegeben.');});};
 $('library-approve').onclick=()=>action(async()=> {
-  const f=$('library-form').elements;if(['subject','body','signature'].some(k=>f[k].value!==libraryVersion[k])||f.useLogo.checked!==libraryVersion.useLogo) throw new Error('Änderungen zuerst als neue Version speichern und anschließend öffnen.');
+  const f=$('library-form').elements;if(['subject','body'].some(k=>f[k].value!==libraryVersion[k])) throw new Error('Änderungen zuerst als neue Version speichern und anschließend öffnen.');
   if(!confirm('Genau diese gespeicherte Vorlage für automatische Vorbereitung freigeben?')) return;
   await api(`/v1/templates/versions/${libraryVersion.id}/approve`,{actor:$('autopilot-settings').elements.actor.value,confirmation:'APPROVE_TEMPLATE_VERSION'});$('library-dialog').close();await refresh();
 });

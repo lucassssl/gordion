@@ -1,6 +1,7 @@
 import type { Database } from "../db.js";
 import { contentHash, validateFinalContent } from "../domain/message.js";
 import { personalize } from "../domain/personalization.js";
+import { senderSignature } from './sender-signature.js';
 
 // Database-only scheduler. It never talks to a mail provider or enables sending.
 export async function prepareCampaign(
@@ -23,9 +24,10 @@ export async function prepareCampaign(
     const [template] =
       await tx`SELECT * FROM message_templates WHERE campaign_id = ${campaignId}
       AND step_index = 0 AND status = 'approved'`;
+    const signature=await senderSignature(tx);
     if (
       !template ||
-      !campaign.signatureText.trim() ||
+      !signature.id ||
       !campaign.legalReviewReference
     )
       return { prepared: 0, skipped: 0 };
@@ -62,7 +64,7 @@ export async function prepareCampaign(
           contact,
           template.subjectTemplate,
           template.bodyTextTemplate,
-          campaign.signatureText,
+          signature.signatureText,
         ));
       } catch {
         skipped++;
@@ -72,7 +74,7 @@ export async function prepareCampaign(
         recipientAddress: contact.email,
         subject,
         bodyText,
-        logoSha256: campaign.logoSha256,
+        logoSha256: signature.logoSha256,
       };
       if (validateFinalContent(content).length) {
         skipped++;
@@ -85,10 +87,10 @@ export async function prepareCampaign(
       const [message] =
         await tx`INSERT INTO messages (enrollment_id, template_id, sequence_index, message_kind,
         status, recipient_address, final_subject, final_body_text, content_sha256, due_at,
-        approved_at, approved_by, approval_content_sha256, authorization_id, personalization_fallbacks, logo_sha256)
+        approved_at, approved_by, approval_content_sha256, authorization_id, personalization_fallbacks, logo_sha256,sender_signature_version_id)
         VALUES (${enrollment!.id}, ${template.id}, 0, 'initial', ${automatic ? "approved" : "awaiting_approval"},
         ${contact.email}, ${subject}, ${bodyText}, ${digest}, now(), ${automatic ? new Date() : null},
-        ${automatic ? "campaign-policy" : null}, ${automatic ? digest : null}, ${contact.authorizationId}, ${tx.json(fallbacks)}, ${campaign.logoSha256}) RETURNING id`;
+        ${automatic ? "campaign-policy" : null}, ${automatic ? digest : null}, ${contact.authorizationId}, ${tx.json(fallbacks)}, ${signature.logoSha256},${signature.id}) RETURNING id`;
       await tx`INSERT INTO audit_events (entity_type, entity_id, event_type, actor_type, actor_id, detail)
         VALUES ('message', ${message!.id}, ${automatic ? "message.policy_approved" : "message.prepared"}, 'system', 'preparation',
         ${tx.json({ campaignId, templateId: template.id, authorizationId: contact.authorizationId, contentSha256: digest })})`;

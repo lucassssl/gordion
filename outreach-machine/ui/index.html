@@ -253,6 +253,18 @@
           Allgemein. Keine Behauptungen aus internen Recherchehinweisen.
         </div>
         <div id="category-list" class="card-grid"></div>
+        <article class="panel">
+          <h2>Eine Signatur für alle Mailentwürfe</h2>
+          <p>Dieser feste Absenderblock gilt unverändert für alle Kategorien, Sprachen, Erstkontakte und Nachfragen. Keine Signatur mehr je Vorlage pflegen.</p>
+          <form id="sender-signature-form">
+            <label>Zentrale Signatur<textarea name="signatureText" rows="7" minlength="8" maxlength="4000" required></textarea></label>
+            <label class="checkbox"><input name="useLogo" type="checkbox"> Gordion-Logo unter der Signatur einbetten</label>
+            <label>Verantwortlicher Betreiber<input name="actor" value="Lucas" minlength="2" required></label>
+            <p id="sender-signature-status" class="muted"></p>
+            <button type="submit" class="primary">Signatur für alle neuen Entwürfe speichern</button>
+          </form>
+          <p>Betreiberanmeldung unter Autopilot erforderlich. Bereits vorbereitete Nachrichten behalten ihre gespeicherte Signatur. Speichern aktiviert keinen Versand.</p>
+        </article>
       </section>
 
       <section id="campaigns" class="view" hidden>
@@ -390,8 +402,8 @@
     <dialog id="library-dialog"><form id="library-form"><h2 id="library-title">Vorlagenversion</h2>
       <label>Betreff<input name="subject" maxlength="255" required></label>
       <label>Nachricht<textarea name="body" rows="15" required></textarea></label>
-      <label>Signatur<textarea name="signature" rows="6" required></textarea></label>
-      <label><input name="useLogo" type="checkbox"> Gordion-Logo anhängen</label>
+      <p>Die zentrale Signatur samt Logo wird beim Erstellen automatisch ergänzt – identisch für alle Sprachen.</p>
+      <pre id="library-signature-preview"></pre>
       <p id="library-status"></p><div class="dialog-actions"><button type="button" data-close="library-dialog">Schließen</button><button type="submit">Als neue Entwurfsversion speichern</button><button id="library-approve" type="button">Diese Version freigeben</button></div>
     </form></dialog>
 
@@ -508,18 +520,7 @@
             minlength="20"
             placeholder="{{salutation}} und {{executionIntro}}; weitere Variablen: {{company}}, {{firstName}}, {{lastName}}, {{role}}. Eigener Ersatz: {{firstName|Team}}"
           ></textarea></label
-        ><label
-          >Geschäftliche Signatur<textarea
-            name="signature"
-            rows="3"
-            required
-            minlength="8"
-            placeholder="Noch offen – bitte finale Signatur hinterlegen."
-          ></textarea></label
-        ><label class="checkbox"
-          ><input type="checkbox" name="useLogo" />Gordion-Logo unter der
-          Signatur einbetten</label
-        ><label
+        ><p>Signatur und Logo werden aus den zentralen Absendereinstellungen übernommen.</p><label
           >Referenz zur Kampagnenprüfung<input
             name="legalReference"
             required
@@ -599,17 +600,7 @@
           Anrede wird nicht aus dem Vornamen erraten. {{evidence}} ist nur ein
           Alias für den geprüften Einstieg, keine rohe Recherche.
         </p>
-        <label
-          >Signatur<textarea
-            name="signature"
-            rows="5"
-            maxlength="2000"
-          ></textarea>
-        </label>
-        <label class="checkbox"
-          ><input type="checkbox" name="useLogo" />Gordion-Logo unter der
-          Signatur einbetten</label
-        >
+        <p>Signatur und Logo werden zentral unter „Kategorien &amp; Vorlagen“ gepflegt und automatisch ergänzt.</p>
         <p class="muted">
           Gilt für neue Kampagnen und Kontaktvorschauen. Bereits freigegebene
           Nachrichten werden nicht verändert.

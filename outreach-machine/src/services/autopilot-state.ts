@@ -4,6 +4,7 @@ import type { Database } from '../db.js';
 import type { AppConfig } from '../config.js';
 import { initialTemplates } from '../domain/autopilot.js';
 import { readMailboxEvidence } from '../mail/mailbox-identity.js';
+import { senderSignature } from './sender-signature.js';
 
 export async function openException(sql:Database,key:string,code:string,detail:Record<string,unknown>={},companyId:string|null=null,messageId:string|null=null) {
   await sql`INSERT INTO autopilot_exceptions(dedupe_key,code,detail,company_id,message_id)
@@ -48,7 +49,9 @@ export async function autopilotPreflight(sql:Database,config:AppConfig) {
     readMailboxEvidence(config.GRAPH_MAILBOX_EVIDENCE_PATH,{tenantId:config.GRAPH_TENANT_ID,mailboxObjectId:config.GRAPH_MAILBOX_OBJECT_ID,senderAddress:config.GRAPH_SENDER_ADDRESS});
   } catch { blockers.push('mailbox_identity_evidence_expired_or_missing'); }
   if(config.GRAPH_CERTIFICATE_PATH) { try { const certificate=new X509Certificate(readFileSync(config.GRAPH_CERTIFICATE_PATH)); const days=(Date.parse(certificate.validTo)-Date.now())/86400000; if(days<=0) blockers.push('certificate_expired'); else if(days<30) warnings.push('certificate_expires_within_30_days'); } catch { blockers.push('certificate_unreadable'); } }
-  const [templates]=await sql`SELECT count(*)::int AS count FROM template_versions WHERE status='approved' AND signature<>''`;
+  const signature=await senderSignature(sql);
+  if(!signature.id) blockers.push('shared_signature_missing');
+  const [templates]=await sql`SELECT count(*)::int AS count FROM template_versions WHERE status='approved'`;
   if(templates!.count!==16) blockers.push('sixteen_templates_not_approved');
   if(!settings!.seedReconciledAt) blockers.push('previous_outreach_not_reconciled');
   if(!settings!.startupReconciledAt) blockers.push('startup_reconciliation_required');

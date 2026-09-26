@@ -38,6 +38,14 @@ unset outreach_password
 
 Danach Supervisor neu starten und unter **Autopilot → Betreiberanmeldung** anmelden. Der automatische Entwicklungs-Cookie und der API-Schlüssel dürfen keine Liveaktivierung, Vorlagenfreigabe oder Regelprüfung ersetzen. Fünf fehlgeschlagene Loginversuche führen zu einer 15-minütigen Sperre; Sitzungen laufen nach einer Stunde ab.
 
+## Zentrale Signatur
+
+Unter **Kategorien & Vorlagen → Eine Signatur für alle Mailentwürfe** wird genau ein fester Absenderblock samt Logoauswahl gepflegt. Er gilt unverändert für alle vier Kategorien, DE/EN, Erstmail und Follow-up sowie für Kontaktvorschauen und manuell/automatisch vorbereitete Kampagnen. Keine automatische Übersetzung der Signatur.
+
+Migration 007 übernimmt die bisherige Signatur nur, wenn alle vier Kategorien exakt übereinstimmen. Uneinheitliche oder leere Altbestände bleiben zur zentralen Einrichtung offen. Es werden keine persönlichen Absenderangaben im Quellcode hinterlegt. Ändern erfordert die lokale Betreiberanmeldung; Speichern aktiviert weder Vorlagen noch Versand. Gleichzeitige Änderungen werden über eine Versionsprüfung abgesichert.
+
+Jeder neue Entwurf friert die aktuell gespeicherte Signaturversion und den Logo-Hash ein. Eine später vorbereitete Nachfrage übernimmt die dann aktuelle zentrale Signatur; bereits vorbereitete Nachrichten werden nie stillschweigend verändert. Historische Signaturfelder in Vorlagen/Kampagnen bleiben zur Nachvollziehbarkeit erhalten, steuern aber keine neuen Entwürfe mehr. Alte API-Felder `signature` und `useLogo` an Kategorie-/Vorlagen-/Kampagnenendpunkten werden nur noch aus Kompatibilitätsgründen angenommen und nicht als Override verwendet.
+
 ## Postfachbindung / Schattenbetrieb
 
 Es gilt genau eine Verbindung aus `mailbox_connections`. `MAILBOX_CONNECTION_ID`, `GRAPH_TENANT_ID`, `GRAPH_MAILBOX_OBJECT_ID`, bestätigte primäre Absenderadresse und `autopilot_config.mailbox_connection_id` müssen übereinstimmen. Keine Auswahl allein nach Adresse und keine automatische Auswahl des ersten Postfachs.
@@ -91,7 +99,8 @@ Alle `/v1`-Aufrufe benötigen lokale Sitzung oder API-Schlüssel. Betreiberentsc
 | `GET/POST /v1/autopilot/country-rules` | Länderregelversionen |
 | `POST /v1/autopilot/authorizations/:id/rule` | bestehende Rechtsgrundlage mit geprüften Regelvoraussetzungen verbinden |
 | `GET/POST /v1/templates/versions` | versionierte Bibliothek |
-| `POST /v1/templates/versions/:id/approve` | gespeicherten Text einschließlich Signatur/Logo freigeben |
+| `POST /v1/templates/versions/:id/approve` | gespeicherten Nachrichtentext freigeben; zentrale Signatur muss vorhanden sein |
+| `GET/POST /v1/sender-signature` | eine gemeinsame Signatur samt Logo, Änderungen nur als Betreiber |
 | `GET /v1/research/runs`, `/v1/exceptions` | paginierte Läufe / Klärungsfälle |
 
 Listen nutzen `limit` und `offset`. `GET /v1/console` liefert echte Gesamtsummen, unabhängig von sichtbaren Seiten. Die Kontakt-Suche in der bestehenden Oberfläche filtert derzeit die geladenen Einträge; weitere Seiten lassen sich nachladen.
@@ -105,7 +114,7 @@ Listen nutzen `limit` und `offset`. `GET /v1/console` liefert echte Gesamtsummen
 ## Noch vor echter Freigabe zu erledigen
 
 1. Betreiberpasswort setzen und geprüfte lokale Postfachverbindung binden; Identitäts-/RBAC-Nachweise bestätigen, verbleibenden negativen Isolationstest klären.
-2. Die 16 Texte einschließlich deutscher/englischer Signatur einmal gemeinsam prüfen/freigeben. Regulierungssnippets sind separat versioniert, aber nicht automatisch in Texte eingesetzt; Anwendung ab 12. Februar 2028, keine pauschale Betroffenheitsgarantie.
+2. Die 16 Nachrichtentexte einmal gemeinsam prüfen/freigeben; die zentrale Signatur nur einmal pflegen. Regulierungssnippets sind separat versioniert, aber nicht automatisch in Texte eingesetzt; Anwendung ab 12. Februar 2028, keine pauschale Betroffenheitsgarantie.
 3. Frühere Anschreiben vollständig mit dem Postfach abgleichen. Namensvarianten / die 25 ausgeschlossenen Bestandsfirmen bleiben bis zur Klärung gesperrt.
 4. Länderregeln und passende Kontakt-Autorisierungen mit echten Nachweisen hinterlegen. Kein Ersetzen durch „wir fragen nur an“.
 5. Vollständiger Schatten-Tageslauf mit realer Recherche und komplettem lesendem Postfachabgleich. Quellenquoten, fehlende Websites und Ausschlüsse prüfen. Ein API-Verbindungstest genügt nicht.

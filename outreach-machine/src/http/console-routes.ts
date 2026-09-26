@@ -5,7 +5,7 @@ import { intakeSchema } from "../domain/intake.js";
 import { importContacts } from "../services/contact-intake.js";
 import { prepareCampaign } from "../services/preparation.js";
 import { personalize, templateErrors } from "../domain/personalization.js";
-import { readLogo } from "../mail/branding.js";
+import { senderSignature } from '../services/sender-signature.js';
 
 const categoryIdSchema = z.enum(["bank", "broker", "asset_manager", "general"]);
 const templateText = (min: number, max: number) =>
@@ -30,7 +30,7 @@ const categorySchema = z.strictObject({
   name: z.string().trim().min(2).max(100),
   subject: templateText(3, 255),
   body: templateText(20, 12000),
-  signature: signatureSchema,
+  signature: signatureSchema.optional(),
   useLogo: z.boolean().default(true),
 });
 const profileSchema = z
@@ -75,7 +75,7 @@ const campaignSchema = z
     name: z.string().trim().min(3).max(150),
     subject: templateText(3, 255),
     body: templateText(20, 12000),
-    signature: signatureSchema.refine((v) => v.length >= 8),
+    signature: signatureSchema.optional(),
     categoryId: categoryIdSchema.default("general"),
     useLogo: z.boolean().default(false),
     legalReference: z.string().trim().min(10).max(1000),
@@ -120,6 +120,7 @@ export function registerConsoleRoutes(app: FastifyInstance, sql: Database) {
       (SELECT count(*)::int FROM contacts ct WHERE ct.review_status='eligible' AND EXISTS(SELECT 1 FROM outreach_authorizations a WHERE a.contact_id=ct.id AND a.revoked_at IS NULL AND a.valid_until>now())) AS reviewed`;
     const [researchConfig]=await sql`SELECT research_enabled FROM autopilot_config WHERE singleton`;
     return {
+      senderSignature:await senderSignature(sql),
       totals,page,
       contacts,
       campaigns,
@@ -142,7 +143,7 @@ export function registerConsoleRoutes(app: FastifyInstance, sql: Database) {
       .parse(request.params);
     const data = categorySchema.parse(request.body);
     await sql.begin(async (tx) => {
-      await tx`UPDATE lead_categories SET name=${data.name}, subject_template=${data.subject}, body_template=${data.body}, signature_text=${data.signature}, use_logo=${data.useLogo}, updated_at=now() WHERE id=${categoryId}`;
+      await tx`UPDATE lead_categories SET name=${data.name}, subject_template=${data.subject}, body_template=${data.body}, updated_at=now() WHERE id=${categoryId}`;
       await tx`INSERT INTO audit_events(entity_type, event_type, actor_type, actor_id, detail) VALUES ('category', 'category.defaults_updated', 'user', 'local-admin', ${tx.json({ categoryId })})`;
     });
     return { saved: true, existingCampaignsChanged: false };
@@ -177,19 +178,21 @@ export function registerConsoleRoutes(app: FastifyInstance, sql: Database) {
     if (!contact) throw new ConsoleConflict("Contact not found");
     const [category] =
       await sql`SELECT * FROM lead_categories WHERE id=${contact.categoryId}`;
+    const signature=await senderSignature(sql);
     const content = personalize(
       contact,
       category!.subjectTemplate,
       category!.bodyTemplate,
-      category!.signatureText,
+      signature.signatureText,
     );
     return {
       ...content,
       recipientAddress: contact.email,
       previewOnly: true,
-      signatureMissing: !category!.signatureText,
+      signatureMissing: !signature.id,
       isTestData: contact.isTestData,
-      logoSha256: category!.useLogo ? readLogo().sha256 : null,
+      logoSha256: signature.logoSha256,
+      senderSignatureVersionId:signature.id,
     };
   });
 
@@ -259,6 +262,8 @@ export function registerConsoleRoutes(app: FastifyInstance, sql: Database) {
     const data = campaignSchema.parse(request.body);
     return sql.begin(async (tx) => {
       await tx`SELECT pg_advisory_xact_lock(hashtextextended('gordion-console-mailbox', 0))`;
+      const signature=await senderSignature(tx);
+      if(!signature.id) throw new ConsoleConflict('Shared sender signature missing');
       let [mailbox] =
         await tx`SELECT id FROM mailbox_connections WHERE sender_address = 'preview@example.test' AND provider = 'simulated'`;
       if (!mailbox)
@@ -268,7 +273,7 @@ export function registerConsoleRoutes(app: FastifyInstance, sql: Database) {
       const [campaign] =
         await tx`INSERT INTO campaigns (name, mailbox_connection_id, signature_text, legal_review_reference, category_id, logo_sha256,
         target_countries, daily_initial_limit, daily_total_limit, max_followups, followup_workday_offsets)
-        VALUES (${data.name}, ${mailbox!.id}, ${data.signature}, ${data.legalReference}, ${data.categoryId}, ${data.useLogo ? readLogo().sha256 : null}, ${data.countries},
+        VALUES (${data.name}, ${mailbox!.id}, ${signature.signatureText}, ${data.legalReference}, ${data.categoryId}, ${signature.logoSha256}, ${data.countries},
         ${data.initialLimit}, ${data.totalLimit}, 0, ARRAY[]::smallint[]) RETURNING id`;
       await tx`INSERT INTO message_templates (campaign_id, step_index, version, subject_template, body_text_template,
         status, approved_at, approved_by) VALUES (${campaign!.id}, 0, 1, ${data.subject}, ${data.body}, 'approved', now(), 'local-admin')`;

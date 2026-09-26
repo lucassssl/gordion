@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomUUID,scryptSync } from "node:crypto";
 import { loadConfig } from "../src/config.js";
 import { createDatabase } from "../src/db.js";
 import { buildHttpApp } from "../src/http/app.js";
 import { prepareAutomaticCampaigns } from "../src/services/preparation.js";
 import { MessageRepository } from "../src/repositories/message-repository.js";
+import { senderSignature,saveSenderSignature } from '../src/services/sender-signature.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL required");
@@ -17,12 +18,14 @@ if (
 }
 const adminKey = randomUUID().repeat(2),
   researchKey = randomUUID().repeat(2);
+const operatorPassword=randomUUID(),operatorSalt='a'.repeat(32);
 const config = loadConfig({
   DATABASE_URL: databaseUrl,
   ADMIN_API_KEY: adminKey,
   RESEARCH_IMPORT_API_KEY: researchKey,
   LOCAL_DASHBOARD_ENABLED: "true",
   LOG_LEVEL: "silent",
+  OPERATOR_PASSWORD_HASH:`scrypt:${operatorSalt}:${scryptSync(operatorPassword,operatorSalt,64).toString('hex')}`,
 });
 const sql = createDatabase(config),
   app = buildHttpApp(config, sql);
@@ -50,6 +53,8 @@ const payload = {
   ],
 };
 try {
+  const signature=await senderSignature(sql);
+  await saveSenderSignature(sql,{revision:signature.revision,signatureText:'Synthetic shared signature only',useLogo:true,actor:'smoke'});
   const noAuth = await app.inject({ url: "/v1/console" });
   assert.equal(noAuth.statusCode, 401);
   assert.equal(
@@ -421,6 +426,26 @@ try {
   assert.equal(automaticMessages.length, 1);
   assert.equal(automaticMessages[0]!.status, "approved");
   assert.equal(automaticMessages[0]!.approvedBy, "campaign-policy");
+  assert.ok(automaticMessages[0]!.finalBodyText.endsWith('Synthetic shared signature only'));
+  const globalBefore=await senderSignature(sql);
+  const signatureUpdate={revision:globalBefore.revision,signatureText:'One shared footer for every category',useLogo:true,actor:'smoke',confirmation:'SAVE_SHARED_SIGNATURE'};
+  assert.equal((await app.inject({method:'POST',url:'/v1/sender-signature',headers:admin,payload:signatureUpdate})).statusCode,403);
+  assert.equal((await app.inject({method:'POST',url:'/v1/sender-signature',headers:research,payload:signatureUpdate})).statusCode,403);
+  const local={host:'127.0.0.1:4310',origin:'http://127.0.0.1:4310'};
+  const login=await app.inject({method:'POST',url:'/local/operator/login',headers:local,payload:{password:operatorPassword}});
+  assert.equal(login.statusCode,200,login.body);
+  const operatorHeaders={...admin,...local,cookie:String(login.headers['set-cookie']).split(';')[0]!};
+  const saved=await app.inject({method:'POST',url:'/v1/sender-signature',headers:operatorHeaders,payload:signatureUpdate});
+  assert.equal(saved.statusCode,200,saved.body);
+  assert.equal((await app.inject({method:'POST',url:'/v1/sender-signature',headers:operatorHeaders,payload:signatureUpdate})).statusCode,409,'stale edits never overwrite a newer signature');
+  assert.equal((await app.inject({method:'POST',url:'/v1/sender-signature',headers:operatorHeaders,payload:{...signatureUpdate,revision:globalBefore.revision+1,signatureText:'Hello {{firstName}}'}})).statusCode,400);
+  const previewAfter=(await app.inject({method:'POST',url:`/v1/contacts/${contact!.id}/preview`,headers:admin,payload:{}})).json();
+  assert.ok(previewAfter.bodyText.endsWith(signatureUpdate.signatureText),'preview uses central signature, not category override');
+  const [preserved]=await sql`SELECT final_body_text,sender_signature_version_id FROM messages WHERE id=${automaticMessages[0]!.id}`;
+  assert.equal(preserved!.finalBodyText,automaticMessages[0]!.finalBodyText);
+  assert.equal(preserved!.senderSignatureVersionId,globalBefore.id);
+  await assert.rejects(sql`UPDATE sender_signature_versions SET signature_text='tampered' WHERE id=${globalBefore.id}`);
+  await assert.rejects(sql`UPDATE messages SET sender_signature_version_id=${saved.json().signature.id} WHERE id=${automaticMessages[0]!.id}`);
   const [inactive] =
     await sql`SELECT status, live_send_enabled FROM campaigns WHERE id = ${campaignId}`;
   assert.equal(inactive!.status, "draft");

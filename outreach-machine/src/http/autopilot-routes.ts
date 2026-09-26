@@ -4,13 +4,20 @@ import type { Database } from '../db.js';
 import type { AppConfig } from '../config.js';
 import { autopilotPreflight,pauseAutopilot } from '../services/autopilot-state.js';
 import { CATEGORIES,isEu,renderAutopilot } from '../domain/autopilot.js';
-import { readLogo } from '../mail/branding.js';
+import { senderSignature,saveSenderSignature } from '../services/sender-signature.js';
 
 const paging=z.object({limit:z.coerce.number().int().min(1).max(100).default(50),offset:z.coerce.number().int().min(0).default(0)});
 const actor=z.string().trim().min(2).max(120);
 const text=z.string().trim().min(1).max(10000);
-const template=z.strictObject({categoryId:z.enum(CATEGORIES),language:z.enum(['de','en']),step:z.union([z.literal(0),z.literal(1)]),subject:text.max(255),body:text,signature:z.string().max(4000),useLogo:z.boolean()});
+const template=z.strictObject({categoryId:z.enum(CATEGORIES),language:z.enum(['de','en']),step:z.union([z.literal(0),z.literal(1)]),subject:text.max(255),body:text,signature:z.string().max(4000).optional(),useLogo:z.boolean().optional()});
 export function registerAutopilotRoutes(app:FastifyInstance,sql:Database,config:AppConfig,operator:(r:FastifyRequest)=>boolean) {
+  app.get('/v1/sender-signature',async()=>senderSignature(sql));
+  app.post('/v1/sender-signature',async(request,reply)=> {
+    if(!operator(request)) return reply.code(403).send({error:'operator_login_required'});
+    const p=z.strictObject({revision:z.number().int().min(0),signatureText:z.string().trim().min(8).max(4000).refine(v=>!/{{|}}|\$\{|[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v)),useLogo:z.boolean(),actor,confirmation:z.literal('SAVE_SHARED_SIGNATURE')}).parse(request.body);
+    const result=await saveSenderSignature(sql,p);
+    return result?{saved:true,signature:result,existingMessagesChanged:false}:reply.code(409).send({error:'signature_version_conflict'});
+  });
   app.get('/v1/autopilot',async()=> {
     const [settings]=await sql`SELECT * FROM autopilot_config WHERE singleton`;
     const [coverage]=await sql`SELECT count(*)::int AS companies,count(*) FILTER(WHERE suitability='eligible')::int AS suitable,
@@ -88,7 +95,7 @@ export function registerAutopilotRoutes(app:FastifyInstance,sql:Database,config:
     const p=template.parse(request.body);
     return sql.begin(async tx=> {await tx`SELECT pg_advisory_xact_lock(hashtextextended('gordion-template-seed',0))`;
       const [result]=await tx`INSERT INTO template_versions(category_id,language,step,version,subject,body,signature,use_logo)
-        SELECT ${p.categoryId},${p.language},${p.step},coalesce(max(version),0)+1,${p.subject},${p.body},${p.signature},${p.useLogo} FROM template_versions WHERE category_id=${p.categoryId} AND language=${p.language} AND step=${p.step} RETURNING *`;return result;
+        SELECT ${p.categoryId},${p.language},${p.step},coalesce(max(version),0)+1,${p.subject},${p.body},'',false FROM template_versions WHERE category_id=${p.categoryId} AND language=${p.language} AND step=${p.step} RETURNING *`;return result;
     });
   });
   app.post('/v1/templates/versions/:id/approve',async(request,reply)=> {
@@ -98,9 +105,11 @@ export function registerAutopilotRoutes(app:FastifyInstance,sql:Database,config:
       await tx`SELECT pg_advisory_xact_lock(hashtextextended('gordion-template-seed',0))`;
       const [t]=await tx`SELECT * FROM template_versions WHERE id=${id} AND status='draft' FOR UPDATE`;
       if(!t) return reply.code(409).send({error:'not_draft'});
-      renderAutopilot({},t as never); // neutral fallback and opt-out validation; no provider operation
+      const signature=await senderSignature(tx);
+      if(!signature.id) return reply.code(409).send({error:'shared_signature_missing'});
+      renderAutopilot({},{...t,signature:signature.signatureText,useLogo:signature.useLogo} as never);
       await tx`UPDATE template_versions SET status='retired' WHERE category_id=${t.categoryId} AND language=${t.language} AND step=${t.step} AND status='approved'`;
-      await tx`UPDATE template_versions SET status='approved',approved_at=now(),approved_by=${p.actor},logo_sha256=${t.useLogo?readLogo().sha256:null} WHERE id=${id}`;
+      await tx`UPDATE template_versions SET status='approved',approved_at=now(),approved_by=${p.actor} WHERE id=${id}`;
       await tx`INSERT INTO audit_events(entity_type,entity_id,event_type,actor_type,actor_id) VALUES('template',${id},'template.approved','user',${p.actor})`;
       return {approved:true};
     });

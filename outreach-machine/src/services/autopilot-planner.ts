@@ -2,12 +2,15 @@ import type { Database } from '../db.js';
 import { CATEGORIES,EU_COUNTRIES,contactLanguage,contactRank,followupDue,renderAutopilot,type LibraryTemplate } from '../domain/autopilot.js';
 import { contentHash } from '../domain/message.js';
 import { openException } from './autopilot-state.js';
+import { senderSignature } from './sender-signature.js';
 
 export async function planAutopilot(sql:Database) {
   return sql.begin(async tx=> {
     await tx`SELECT pg_advisory_xact_lock(hashtextextended('gordion-autopilot-planner',0))`;
     const [config]=await tx`SELECT * FROM autopilot_config WHERE singleton`;
     if(!config?.mailboxConnectionId || !config.seedReconciledAt) return {prepared:0};
+    const signature=await senderSignature(tx);
+    if(!signature.id) return {prepared:0};
     let [campaign]=await tx`SELECT * FROM campaigns WHERE autopilot AND mailbox_connection_id=${config.mailboxConnectionId} AND status<>'archived' ORDER BY created_at LIMIT 1`;
     if(!campaign) [campaign]=await tx`INSERT INTO campaigns(name,mailbox_connection_id,autopilot,status,timezone,send_window_start,send_window_end,daily_initial_limit,daily_total_limit,followup_workday_offsets,max_followups,legal_review_reference,target_countries)
       VALUES('EU Autopilot',${config.mailboxConnectionId},true,'paused','Europe/Berlin','10:00','16:00',45,50,ARRAY[7]::smallint[],1,'Per-message reviewed authorization and country rule',${[...EU_COUNTRIES]}) RETURNING *`;
@@ -23,11 +26,11 @@ export async function planAutopilot(sql:Database) {
       const due=followupDue(parent.sentConfirmedAt); if(due.getTime()>Date.now()) continue;
       const [template]=await tx`SELECT * FROM template_versions WHERE id=${parent.followupTemplateId} AND status IN ('approved','retired')`;
       if(!template) continue;
-      const rendered=renderAutopilot(parent.snapshot.contact,template as LibraryTemplate);
+      const rendered=renderAutopilot(parent.snapshot.contact,{...template,signature:signature.signatureText,useLogo:signature.useLogo} as LibraryTemplate);
       const subject=`Re: ${parent.finalSubject.replace(/^Re:\s*/i,'')}`;
-      const hash=contentHash({recipientAddress:parent.recipientAddress,subject,bodyText:rendered.bodyText,logoSha256:template.logoSha256});
-      await tx`INSERT INTO messages(enrollment_id,sequence_index,message_kind,status,recipient_address,final_subject,final_body_text,content_sha256,due_at,approved_at,approved_by,approval_content_sha256,authorization_id,personalization_fallbacks,logo_sha256,template_version_id,country_rule_id,snapshot,parent_message_id)
-        VALUES(${parent.enrollmentId},1,'followup','approved',${parent.recipientAddress},${subject},${rendered.bodyText},${hash},${due},now(),'autopilot-template-policy',${hash},${parent.authorizationId},${tx.json(rendered.fallbacks)},${template.logoSha256},${template.id},${parent.countryRuleId},${tx.json({...parent.snapshot,templateVersionId:template.id,templateVersion:template.version,signature:template.signature,logoSha256:template.logoSha256,step:1,facts:rendered.facts,fallbacks:rendered.fallbacks} as never)},${parent.id})`;
+      const hash=contentHash({recipientAddress:parent.recipientAddress,subject,bodyText:rendered.bodyText,logoSha256:signature.logoSha256});
+      await tx`INSERT INTO messages(enrollment_id,sequence_index,message_kind,status,recipient_address,final_subject,final_body_text,content_sha256,due_at,approved_at,approved_by,approval_content_sha256,authorization_id,personalization_fallbacks,logo_sha256,template_version_id,country_rule_id,snapshot,parent_message_id,sender_signature_version_id)
+        VALUES(${parent.enrollmentId},1,'followup','approved',${parent.recipientAddress},${subject},${rendered.bodyText},${hash},${due},now(),'autopilot-template-policy',${hash},${parent.authorizationId},${tx.json(rendered.fallbacks)},${signature.logoSha256},${template.id},${parent.countryRuleId},${tx.json({...parent.snapshot,templateVersionId:template.id,templateVersion:template.version,signature:signature.signatureText,signatureVersionId:signature.id,logoSha256:signature.logoSha256,step:1,facts:rendered.facts,fallbacks:rendered.fallbacks} as never)},${parent.id},${signature.id})`;
       prepared++;
     }
     // SQL excludes ineligible records before batching: UI pagination never limits the eligible population.
@@ -70,12 +73,12 @@ export async function planAutopilot(sql:Database) {
         const initial=templates.find(t=>t.step===0),followup=templates.find(t=>t.step===1);if(!initial||!followup) continue;
         try {
           const frozenContact={firstName:contact.firstName,lastName:contact.lastName,honorific:contact.honorific,name:company.name,roleTitle:contact.roleTitle,executionIntro:contact.executionIntro,introSourceUrl:contact.introSourceUrl,introVerifiedAt:contact.introVerifiedAt,introLanguage:contact.introLanguage};
-          const rendered=renderAutopilot(frozenContact,initial as LibraryTemplate);
-          const hash=contentHash({recipientAddress:contact.email,subject:rendered.subject,bodyText:rendered.bodyText,logoSha256:initial.logoSha256});
+          const rendered=renderAutopilot(frozenContact,{...initial,signature:signature.signatureText,useLogo:signature.useLogo} as LibraryTemplate);
+          const hash=contentHash({recipientAddress:contact.email,subject:rendered.subject,bodyText:rendered.bodyText,logoSha256:signature.logoSha256});
           const [enrollment]=await tx`INSERT INTO enrollments(campaign_id,company_id,contact_id,status,followup_template_id) VALUES(${campaign!.id},${company.id},${contact.id},'active',${followup.id}) RETURNING id`;
-          const snapshot={contact:frozenContact,category,language,templateVersionId:initial.id,templateVersion:initial.version,signature:initial.signature,logoSha256:initial.logoSha256,countryRuleId:contact.countryRuleId,sourceUrl:contact.sourceUrl,sourceCheckedAt:contact.sourceCheckedAt,facts:rendered.facts,fallbacks:rendered.fallbacks,suitabilityEvidence:company.suitabilityEvidence};
-          await tx`INSERT INTO messages(enrollment_id,sequence_index,message_kind,status,recipient_address,final_subject,final_body_text,content_sha256,due_at,approved_at,approved_by,approval_content_sha256,authorization_id,personalization_fallbacks,logo_sha256,template_version_id,country_rule_id,snapshot)
-            VALUES(${enrollment!.id},0,'initial','approved',${contact.email},${rendered.subject},${rendered.bodyText},${hash},now(),now(),'autopilot-template-policy',${hash},${contact.authorizationId},${tx.json(rendered.fallbacks)},${initial.logoSha256},${initial.id},${contact.countryRuleId},${tx.json(snapshot as never)})`;
+          const snapshot={contact:frozenContact,category,language,templateVersionId:initial.id,templateVersion:initial.version,signature:signature.signatureText,signatureVersionId:signature.id,logoSha256:signature.logoSha256,countryRuleId:contact.countryRuleId,sourceUrl:contact.sourceUrl,sourceCheckedAt:contact.sourceCheckedAt,facts:rendered.facts,fallbacks:rendered.fallbacks,suitabilityEvidence:company.suitabilityEvidence};
+          await tx`INSERT INTO messages(enrollment_id,sequence_index,message_kind,status,recipient_address,final_subject,final_body_text,content_sha256,due_at,approved_at,approved_by,approval_content_sha256,authorization_id,personalization_fallbacks,logo_sha256,template_version_id,country_rule_id,snapshot,sender_signature_version_id)
+            VALUES(${enrollment!.id},0,'initial','approved',${contact.email},${rendered.subject},${rendered.bodyText},${hash},now(),now(),'autopilot-template-policy',${hash},${contact.authorizationId},${tx.json(rendered.fallbacks)},${signature.logoSha256},${initial.id},${contact.countryRuleId},${tx.json(snapshot as never)},${signature.id})`;
           prepared++;
         } catch(e) {
           // Rendering is deterministic; a bad template must not create a provider side effect.
