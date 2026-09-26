@@ -53,6 +53,14 @@ export const intakeSchema = z.strictObject({
           .max(254)
           .transform((value) => value.toLowerCase()),
         firstName: z.string().trim().max(100).default(""),
+        lastName: z.string().trim().max(100).default(""),
+        honorific: z.enum(["neutral", "herr", "frau"]).default("neutral"),
+        categoryId: z
+          .enum(["bank", "broker", "asset_manager", "general"])
+          .default("general"),
+        executionIntro: z.string().trim().max(3000).default(""),
+        introSourceUrl: httpUrl.optional(),
+        isTestData: z.boolean().default(false),
         roleTitle: z.string().trim().min(2).max(200),
         sourceUrl: httpUrl,
         sourceCheckedAt: z.iso

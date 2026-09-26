@@ -8,6 +8,9 @@ import type { Database } from "../db.js";
 import { registerLocalDashboard, keyMatches } from './local-dashboard.js';
 import { registerConsoleRoutes, ConsoleConflict } from './console-routes.js';
 import { IntakeConflict } from '../services/contact-intake.js';
+import { registerOperatorAuth } from './operator-auth.js';
+import { registerAutopilotRoutes } from './autopilot-routes.js';
+import { pauseAutopilot } from '../services/autopilot-state.js';
 
 const reasonSchema = z.object({
   reason: z.string().trim().min(3).max(500),
@@ -41,6 +44,8 @@ export function buildHttpApp(config: AppConfig, sql: Database) {
 
   void app.register(helmet, { contentSecurityPolicy: false });
   const localSession = registerLocalDashboard(app, config);
+  const operator = registerOperatorAuth(app, config);
+  registerAutopilotRoutes(app, sql, config, operator);
   registerConsoleRoutes(app, sql);
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) return reply.code(400).send({ error: 'invalid_input', fields: error.issues.map(x => x.path.join('.')) });
@@ -59,7 +64,7 @@ export function buildHttpApp(config: AppConfig, sql: Database) {
       if (request.method === 'POST' && request.url === '/v1/imports' && keyMatches(researchKey, config.RESEARCH_IMPORT_API_KEY)) return;
       return reply.code(403).send({ error: 'research_import_only' });
     }
-    if (localSession(request)) return;
+    if (operator(request) || localSession(request)) return;
     const supplied = request.headers["x-admin-api-key"];
     if (typeof supplied !== "string" || !constantTimeEquals(supplied, config.ADMIN_API_KEY)) {
       return reply.code(401).send({ error: "unauthorized" });
@@ -111,6 +116,7 @@ export function buildHttpApp(config: AppConfig, sql: Database) {
   app.post("/v1/system/pause", async (request, reply) => {
     const parsed = reasonSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    await pauseAutopilot(sql,parsed.data.reason,parsed.data.actor,true);
     await sql`
       UPDATE system_control
       SET globally_paused = true,
@@ -122,6 +128,7 @@ export function buildHttpApp(config: AppConfig, sql: Database) {
   });
 
   app.post("/v1/system/resume", async (request, reply) => {
+    if (config.MAIL_PROVIDER === 'microsoft_graph') return reply.code(409).send({ error:'use_autopilot_activation_with_preflight' });
     const parsed = resumeSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     if (!config.LIVE_SEND_ENABLED) {

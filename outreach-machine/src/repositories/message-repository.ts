@@ -12,6 +12,7 @@ export interface LeasedMessage {
   recipientAddress: string;
   finalSubject: string;
   finalBodyText: string;
+  logoSha256?: string | null;
   contentSha256: string;
   approvalContentSha256: string;
   graphMessageId: string | null;
@@ -39,6 +40,7 @@ export class MessageRepository {
           m.recipient_address,
           m.final_subject,
           m.final_body_text,
+          m.logo_sha256,
           m.content_sha256,
           m.approval_content_sha256,
           m.graph_message_id,
@@ -51,6 +53,7 @@ export class MessageRepository {
         JOIN campaigns c ON c.id = e.campaign_id
         CROSS JOIN system_control sc
         WHERE m.status = 'approved'
+          AND NOT c.autopilot
           AND m.due_at <= ${now}
           AND sc.globally_paused = false
           AND c.status = 'active'
@@ -132,6 +135,7 @@ export class MessageRepository {
           m.recipient_address,
           m.final_subject,
           m.final_body_text,
+          m.logo_sha256,
           m.content_sha256,
           m.approval_content_sha256,
           m.graph_message_id,
@@ -147,6 +151,7 @@ export class MessageRepository {
         JOIN campaigns c ON c.id = e.campaign_id
         CROSS JOIN system_control sc
         WHERE m.status = 'draft_created'
+          AND NOT c.autopilot
           AND m.due_at <= ${now}
           AND m.graph_message_id IS NOT NULL
           AND sc.globally_paused = false
@@ -236,6 +241,7 @@ export class MessageRepository {
           JOIN send_reservations sr ON sr.message_id = m.id AND sr.state = 'reserved'
           CROSS JOIN system_control sc
           WHERE m.id = ${message.id}
+            AND NOT c.autopilot
             AND m.status = 'leased'
             AND m.lease_owner = ${workerId}
             AND m.lease_expires_at > ${now}
@@ -410,7 +416,9 @@ export class MessageRepository {
           e.campaign_id
         FROM messages m
         JOIN enrollments e ON e.id = m.enrollment_id
+        JOIN campaigns c ON c.id = e.campaign_id
         WHERE m.status = 'send_accepted'
+          AND NOT c.autopilot
           AND m.graph_message_id IS NOT NULL
           AND m.send_accepted_at < ${new Date(now.getTime() - 5_000)}
           AND (m.lease_expires_at IS NULL OR m.lease_expires_at < ${now})

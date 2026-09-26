@@ -7,6 +7,7 @@ import { MessageRepository } from "./repositories/message-repository.js";
 import { DeliveryWorker } from "./services/delivery-worker.js";
 
 const config = loadConfig();
+if (config.MAIL_PROVIDER === 'microsoft_graph') throw new Error('Use autopilot:start for Graph; legacy delivery lacks mailbox-wide gates');
 const sql = createDatabase(config);
 const provider = createMailProvider(config);
 const workerId = `delivery-${randomUUID()}`;

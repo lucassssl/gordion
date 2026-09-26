@@ -20,6 +20,13 @@ export function registerLocalDashboard(
     request.headers.origin === expectedOrigin;
 
   if (config.LOCAL_DASHBOARD_ENABLED) {
+    app.get("/gordion-logo.png", async (request, reply) => {
+      if (!local(request)) return reply.code(403).send({ error: "local_only" });
+      return reply
+        .header("cache-control", "no-store")
+        .type("image/png")
+        .send(await readFile(path.resolve("assets/gordion-logo.png")));
+    });
     const files = [
       ["/", "index.html", "text/html"],
       ["/console.js", "console.js", "application/javascript"],
@@ -42,6 +49,8 @@ export function registerLocalDashboard(
     app.post("/local/session", async (request, reply) => {
       if (!local(request) || !sameOrigin(request))
         return reply.code(403).send({ error: "local_origin_required" });
+      if (config.MAIL_PROVIDER !== 'simulated' || config.LIVE_SEND_ENABLED)
+        return reply.code(401).send({ error: 'operator_login_required' });
       for (const [token, expires] of sessions)
         if (expires <= Date.now()) sessions.delete(token);
       if (sessions.size >= 100)

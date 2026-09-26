@@ -4,15 +4,80 @@ import type { Database } from "../db.js";
 import { intakeSchema } from "../domain/intake.js";
 import { importContacts } from "../services/contact-intake.js";
 import { prepareCampaign } from "../services/preparation.js";
+import { personalize, templateErrors } from "../domain/personalization.js";
+import { readLogo } from "../mail/branding.js";
+
+const categoryIdSchema = z.enum(["bank", "broker", "asset_manager", "general"]);
+const templateText = (min: number, max: number) =>
+  z
+    .string()
+    .trim()
+    .min(min)
+    .max(max)
+    .superRefine((value, ctx) => {
+      for (const message of templateErrors(value))
+        ctx.addIssue({ code: "custom", message });
+    });
+const signatureSchema = z
+  .string()
+  .trim()
+  .max(2000)
+  .refine(
+    (value) => !/{{|}}|\$\{/.test(value),
+    "Signatur darf keine Platzhalter enthalten",
+  );
+const categorySchema = z.strictObject({
+  name: z.string().trim().min(2).max(100),
+  subject: templateText(3, 255),
+  body: templateText(20, 12000),
+  signature: signatureSchema,
+  useLogo: z.boolean().default(true),
+});
+const profileSchema = z
+  .strictObject({
+    firstName: z.string().trim().max(100),
+    lastName: z.string().trim().max(100),
+    honorific: z.enum(["neutral", "herr", "frau"]),
+    categoryId: categoryIdSchema,
+    executionIntro: z
+      .string()
+      .trim()
+      .max(3000)
+      .refine((v) => !/{{|}}|\$\{/.test(v)),
+    introSourceUrl: z.union([
+      z.literal(""),
+      z
+        .url()
+        .max(2000)
+        .refine((v) => {
+          const u = new URL(v);
+          return (
+            ["http:", "https:"].includes(u.protocol) &&
+            !u.username &&
+            !u.password
+          );
+        }),
+    ]),
+    introVerified: z.boolean(),
+    isTestData: z.boolean(),
+    language: z.enum(['de','en']).nullable().optional(),
+    introLanguage: z.enum(['de','en']).optional(),
+  })
+  .refine(
+    (v) => !v.introVerified || Boolean(v.executionIntro && v.introSourceUrl),
+    "Geprüfter Einstieg benötigt Text und Quelle",
+  );
 
 const idSchema = z.strictObject({ id: z.uuid() });
 export class ConsoleConflict extends Error {}
 const campaignSchema = z
   .strictObject({
     name: z.string().trim().min(3).max(150),
-    subject: z.string().trim().min(3).max(255),
-    body: z.string().trim().min(20).max(12000),
-    signature: z.string().trim().min(8).max(2000),
+    subject: templateText(3, 255),
+    body: templateText(20, 12000),
+    signature: signatureSchema.refine((v) => v.length >= 8),
+    categoryId: categoryIdSchema.default("general"),
+    useLogo: z.boolean().default(false),
     legalReference: z.string().trim().min(10).max(1000),
     countries: z
       .array(z.string().regex(/^[A-Z]{2}$/))
@@ -28,37 +93,103 @@ const campaignSchema = z
   );
 
 export function registerConsoleRoutes(app: FastifyInstance, sql: Database) {
-  app.get("/v1/console", async () => {
-    const [contacts, campaigns, messages, imports, audit, mailbox] =
+  app.get("/v1/console", async (request) => {
+    const page=z.object({limit:z.coerce.number().int().min(1).max(300).default(100),offset:z.coerce.number().int().min(0).default(0)}).parse(request.query);
+    const [contacts, campaigns, messages, imports, audit, mailbox, categories] =
       await Promise.all([
-        sql`SELECT ct.id, ct.email, ct.first_name, ct.role_title, ct.review_status, ct.source_url,
+        sql`SELECT ct.id, ct.email, ct.first_name, ct.last_name, ct.honorific, ct.category_id,ct.language,ct.intro_language,
+        ct.execution_intro, ct.intro_source_url, ct.intro_verified_at, ct.is_test_data,
+        ct.role_title, ct.review_status, ct.source_url,
         ct.source_checked_at, co.name AS company_name, co.domain, co.country_code, co.fit_tier,
         co.execution_evidence, co.execution_evidence_url,
         EXISTS(SELECT 1 FROM outreach_authorizations a WHERE a.contact_id = ct.id
           AND revoked_at IS NULL AND valid_until > now()) AS authorized
-        FROM contacts ct JOIN companies co ON co.id = ct.company_id ORDER BY ct.created_at DESC LIMIT 300`,
-        sql`SELECT id, name, status, preparation_mode, daily_initial_limit, daily_total_limit,
-        target_countries, signature_text, live_send_enabled FROM campaigns ORDER BY created_at DESC LIMIT 100`,
-        sql`SELECT m.id, m.status, m.recipient_address, m.final_subject, m.final_body_text, m.content_sha256,
+        FROM contacts ct JOIN companies co ON co.id = ct.company_id ORDER BY ct.created_at DESC,ct.id LIMIT ${page.limit} OFFSET ${page.offset}`,
+        sql`SELECT id, name, category_id, status, preparation_mode, daily_initial_limit, daily_total_limit,
+        target_countries, signature_text, logo_sha256, live_send_enabled FROM campaigns ORDER BY created_at DESC,id LIMIT ${page.limit} OFFSET ${page.offset}`,
+        sql`SELECT m.id, m.status, m.recipient_address, m.final_subject, m.final_body_text, m.content_sha256, m.personalization_fallbacks, m.logo_sha256,
         c.name AS campaign_name FROM messages m JOIN enrollments e ON e.id = m.enrollment_id
-        JOIN campaigns c ON c.id = e.campaign_id ORDER BY m.created_at DESC LIMIT 100`,
+        JOIN campaigns c ON c.id = e.campaign_id ORDER BY m.created_at DESC,m.id LIMIT ${page.limit} OFFSET ${page.offset}`,
         sql`SELECT id, source, external_id, imported_count, duplicate_count, blocked_count, created_at
-        FROM import_batches ORDER BY created_at DESC LIMIT 20`,
-        sql`SELECT event_type, actor_id, occurred_at FROM audit_events ORDER BY occurred_at DESC LIMIT 30`,
-        sql`SELECT provider, status, last_sync_at FROM mailbox_connections ORDER BY created_at DESC`,
+        FROM import_batches ORDER BY created_at DESC,id LIMIT ${page.limit} OFFSET ${page.offset}`,
+        sql`SELECT event_type, actor_id, occurred_at FROM audit_events ORDER BY occurred_at DESC,id LIMIT ${page.limit} OFFSET ${page.offset}`,
+        sql`SELECT provider, status, last_sync_at FROM mailbox_connections ORDER BY created_at DESC,id LIMIT ${page.limit} OFFSET ${page.offset}`,
+        sql`SELECT * FROM lead_categories ORDER BY CASE WHEN id='general' THEN 1 ELSE 0 END, name`,
       ]);
+    const [totals]=await sql`SELECT (SELECT count(*)::int FROM contacts) AS contacts,(SELECT count(*)::int FROM messages) AS messages,
+      (SELECT count(*)::int FROM contacts ct WHERE ct.review_status='eligible' AND EXISTS(SELECT 1 FROM outreach_authorizations a WHERE a.contact_id=ct.id AND a.revoked_at IS NULL AND a.valid_until>now())) AS reviewed`;
+    const [researchConfig]=await sql`SELECT research_enabled FROM autopilot_config WHERE singleton`;
     return {
+      totals,page,
       contacts,
       campaigns,
       messages,
       imports,
       audit,
       mailbox,
+      categories,
       research: {
-        status: "not_connected",
+        status: researchConfig!.researchEnabled ? 'enabled' : 'paused',
         automaticImportReady: true,
-        note: "Kein Rechercheanbieter oder Suchlauf verbunden. Import-Schnittstelle bereit; Recherche startet nicht von selbst.",
+        note: researchConfig!.researchEnabled ? 'Öffentliche ESMA- und Website-Recherche aktiviert. Fortschritt im Autopilot.' : 'Öffentliche Recherche vorbereitet, aber noch nicht aktiviert. Bestehende Listen können importiert werden.',
       },
+    };
+  });
+
+  app.post("/v1/categories/:categoryId", async (request) => {
+    const { categoryId } = z
+      .object({ categoryId: categoryIdSchema })
+      .parse(request.params);
+    const data = categorySchema.parse(request.body);
+    await sql.begin(async (tx) => {
+      await tx`UPDATE lead_categories SET name=${data.name}, subject_template=${data.subject}, body_template=${data.body}, signature_text=${data.signature}, use_logo=${data.useLogo}, updated_at=now() WHERE id=${categoryId}`;
+      await tx`INSERT INTO audit_events(entity_type, event_type, actor_type, actor_id, detail) VALUES ('category', 'category.defaults_updated', 'user', 'local-admin', ${tx.json({ categoryId })})`;
+    });
+    return { saved: true, existingCampaignsChanged: false };
+  });
+
+  app.post("/v1/contacts/:id/profile", async (request) => {
+    const { id } = idSchema.parse(request.params);
+    const data = profileSchema.parse(request.body);
+    return sql.begin(async (tx) => {
+      await tx`SELECT singleton FROM system_control WHERE singleton FOR UPDATE`;
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended('gordion-prepare', 0))`;
+      const [contact] =
+        await tx`SELECT id,language,intro_language FROM contacts WHERE id=${id} FOR UPDATE`;
+      if (!contact) throw new ConsoleConflict("Contact not found");
+      const pending =
+        await tx`SELECT id FROM enrollments WHERE contact_id=${id} AND status IN ('pending','active','paused') LIMIT 1`;
+      if (pending.length)
+        throw new ConsoleConflict(
+          "Stop the existing sequence before editing contact personalization",
+        );
+      await tx`UPDATE contacts SET first_name=${data.firstName}, last_name=${data.lastName}, honorific=${data.honorific}, category_id=${data.categoryId}, execution_intro=${data.executionIntro}, intro_source_url=${data.introSourceUrl || null}, intro_verified_at=${data.introVerified ? new Date() : null}, is_test_data=${data.isTestData} WHERE id=${id}`;
+      await tx`UPDATE contacts SET language=${data.language===undefined?contact.language:data.language},intro_language=${data.introLanguage || contact.introLanguage || 'de'} WHERE id=${id}`;
+      await tx`INSERT INTO audit_events(entity_type, entity_id, event_type, actor_type, actor_id, detail) VALUES ('contact', ${id}, 'contact.personalization_updated', 'user', 'local-admin', ${tx.json({ categoryId: data.categoryId, introVerified: data.introVerified })})`;
+      return { saved: true, sendingEnabled: false };
+    });
+  });
+
+  app.post("/v1/contacts/:id/preview", async (request) => {
+    const { id } = idSchema.parse(request.params);
+    const [contact] =
+      await sql`SELECT ct.*, co.name FROM contacts ct JOIN companies co ON co.id=ct.company_id WHERE ct.id=${id}`;
+    if (!contact) throw new ConsoleConflict("Contact not found");
+    const [category] =
+      await sql`SELECT * FROM lead_categories WHERE id=${contact.categoryId}`;
+    const content = personalize(
+      contact,
+      category!.subjectTemplate,
+      category!.bodyTemplate,
+      category!.signatureText,
+    );
+    return {
+      ...content,
+      recipientAddress: contact.email,
+      previewOnly: true,
+      signatureMissing: !category!.signatureText,
+      isTestData: contact.isTestData,
+      logoSha256: category!.useLogo ? readLogo().sha256 : null,
     };
   });
 
@@ -135,9 +266,9 @@ export function registerConsoleRoutes(app: FastifyInstance, sql: Database) {
           await tx`INSERT INTO mailbox_connections (name, provider, auth_mode, sender_address, status)
         VALUES ('Lokale Vorschau – kein Versand', 'simulated', 'simulated', 'preview@example.test', 'testing') RETURNING id`;
       const [campaign] =
-        await tx`INSERT INTO campaigns (name, mailbox_connection_id, signature_text, legal_review_reference,
+        await tx`INSERT INTO campaigns (name, mailbox_connection_id, signature_text, legal_review_reference, category_id, logo_sha256,
         target_countries, daily_initial_limit, daily_total_limit, max_followups, followup_workday_offsets)
-        VALUES (${data.name}, ${mailbox!.id}, ${data.signature}, ${data.legalReference}, ${data.countries},
+        VALUES (${data.name}, ${mailbox!.id}, ${data.signature}, ${data.legalReference}, ${data.categoryId}, ${data.useLogo ? readLogo().sha256 : null}, ${data.countries},
         ${data.initialLimit}, ${data.totalLimit}, 0, ARRAY[]::smallint[]) RETURNING id`;
       await tx`INSERT INTO message_templates (campaign_id, step_index, version, subject_template, body_text_template,
         status, approved_at, approved_by) VALUES (${campaign!.id}, 0, 1, ${data.subject}, ${data.body}, 'approved', now(), 'local-admin')`;

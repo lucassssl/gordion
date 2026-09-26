@@ -29,7 +29,8 @@ export async function importContacts(sql: Database, batch: IntakeBatch) {
     for (const item of batch.contacts) {
       const domain = normalizeDomain(item.domain);
       let [company] =
-        await tx`SELECT id FROM companies WHERE domain = ${domain}`;
+        await tx`SELECT id FROM companies WHERE domain = ${domain}
+          AND normalized_name = ${item.companyName.toLowerCase()} AND country_code = ${item.countryCode}`;
       const [existing] =
         await tx`SELECT id, company_id FROM contacts WHERE email = ${item.email}`;
       const stops =
@@ -48,13 +49,18 @@ export async function importContacts(sql: Database, batch: IntakeBatch) {
           [company] =
             await tx`INSERT INTO companies (name, normalized_name, domain, website, country_code,
             fit_tier, execution_evidence, execution_evidence_url, researched_at)
-            VALUES (${item.companyName}, ${item.companyName.toLowerCase()}, ${domain}, ${`https://${domain}`},
+            VALUES (${item.companyName}, ${item.companyName.toLowerCase()}, ${domain}, ${normalizeDomain(new URL(item.sourceUrl).hostname) === domain ? new URL(item.sourceUrl).origin : null},
             ${item.countryCode}, ${item.fitTier}, ${item.executionEvidence}, ${item.executionEvidenceUrl},
             ${item.sourceCheckedAt}) RETURNING id`;
+          await tx`INSERT INTO company_domains(company_id,domain,source_url,checked_at)
+            VALUES(${company!.id},${domain},${item.sourceUrl},${item.sourceCheckedAt}) ON CONFLICT DO NOTHING`;
         }
         const [contact] =
-          await tx`INSERT INTO contacts (company_id, email, first_name, role_title, target_role,
-          source_url, source_checked_at) VALUES (${company!.id}, ${item.email}, ${item.firstName},
+          await tx`INSERT INTO contacts (company_id, email, first_name, last_name, honorific, category_id,
+          execution_intro, intro_source_url, is_test_data, role_title, target_role,
+          source_url, source_checked_at) VALUES (${company!.id}, ${item.email}, ${item.firstName}, ${item.lastName},
+          ${item.honorific}, ${item.categoryId}, ${item.executionIntro}, ${item.introSourceUrl ?? null},
+          ${item.isTestData || /Testdaten/i.test(item.companyName) || /\.(example|test)$/.test(domain)},
           ${item.roleTitle}, ${item.roleTitle}, ${item.sourceUrl}, ${item.sourceCheckedAt}) RETURNING id`;
         contactId = contact!.id;
         imported++;

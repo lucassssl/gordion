@@ -119,6 +119,11 @@ function renderContacts() {
       actions = el("td");
     name.append(el("strong", contact.companyName), el("small", contact.email));
     role.append(
+      el(
+        "small",
+        data.categories?.find((c) => c.id === contact.categoryId)?.name ||
+          "Allgemein",
+      ),
       el("span", contact.roleTitle || "Rolle offen"),
       el(
         "small",
@@ -140,6 +145,45 @@ function renderContacts() {
       ),
     );
     if (contact.authorized) state.append(el("small", "Nachweis hinterlegt"));
+    if (contact.isTestData) state.append(el("small", "Testdaten"));
+    actions.append(
+      button("Personalisieren", () => {
+        const form = $("profile-form");
+        form.reset();
+        $("profile-id").value = contact.id;
+        $("profile-email").textContent = contact.email;
+        fillCategories($("profile-category"), contact.categoryId);
+        for (const key of [
+          "firstName",
+          "lastName",
+          "honorific",
+          "executionIntro",
+          "introSourceUrl",
+        ])
+          form.elements[key].value =
+            contact[key] || (key === "honorific" ? "neutral" : "");
+        form.elements.introVerified.checked = Boolean(contact.introVerifiedAt);
+        form.elements.language.value=contact.language || '';
+        form.elements.introLanguage.value=contact.introLanguage || 'de';
+        form.elements.isTestData.checked = contact.isTestData;
+        $("profile-dialog").showModal();
+      }),
+      button("Mailvorschau", async () => {
+        const preview = await api(`/v1/contacts/${contact.id}/preview`, {});
+        selectedMessage = null;
+        $("preview-recipient").textContent =
+          `An: ${preview.recipientAddress} · Vorschau, nicht versendet`;
+        $("preview-subject").textContent = preview.subject;
+        $("preview-body").textContent = preview.bodyText;
+        $("preview-logo").hidden = !preview.logoSha256;
+        $("preview-fallbacks").textContent =
+          fallbackNote(preview.fallbacks) +
+          (preview.signatureMissing ? " · Signatur fehlt noch." : "") +
+          (preview.isTestData ? " · Synthetische Testdaten." : "");
+        $("approve-message").hidden = true;
+        $("message-dialog").showModal();
+      }),
+    );
     if (contact.reviewStatus !== "suppressed") {
       actions.append(
         button("Prüfen", () => {
@@ -185,6 +229,11 @@ function renderCampaigns() {
     card.append(
       el("span", "KEIN LIVEVERSAND", "tag amber"),
       el("h3", campaign.name),
+      el(
+        "small",
+        data.categories?.find((c) => c.id === campaign.categoryId)?.name ||
+          "Ältere Kampagne: alle Kategorien",
+      ),
       el(
         "p",
         `${campaign.targetCountries.join(", ")} · ${campaign.dailyInitialLimit} neue / ${campaign.dailyTotalLimit} gesamt pro Tag`,
@@ -248,6 +297,10 @@ function renderMessages() {
         $("preview-recipient").textContent = `An: ${message.recipientAddress}`;
         $("preview-subject").textContent = message.finalSubject;
         $("preview-body").textContent = message.finalBodyText;
+        $("preview-logo").hidden = !message.logoSha256;
+        $("preview-fallbacks").textContent = fallbackNote(
+          message.personalizationFallbacks,
+        );
         $("approve-message").hidden = message.status !== "awaiting_approval";
         $("message-dialog").showModal();
       }),
@@ -257,23 +310,29 @@ function renderMessages() {
   }
 }
 async function refresh() {
+  await refreshAutopilot();
   const [fresh, system] = await Promise.all([
     api("/v1/console"),
     api("/v1/system/status"),
   ]);
   data = fresh;
-  $("metric-contacts").textContent = data.contacts.length;
-  $("nav-count").textContent = data.contacts.length;
-  $("metric-reviewed").textContent = data.contacts.filter(
-    (c) => c.authorized && c.reviewStatus === "eligible",
-  ).length;
-  $("metric-messages").textContent = data.messages.length;
+  $("metric-contacts").textContent = data.totals.contacts;
+  $("nav-count").textContent = data.totals.contacts;
+  $("metric-reviewed").textContent = data.totals.reviewed;
+  $("metric-messages").textContent = data.totals.messages;
+  consoleOffset=data.page.limit;
+  $('load-more-records').disabled=Math.max(data.contacts.length,data.campaigns.length,data.messages.length,data.imports.length,data.audit.length)<data.page.limit;
   $("pause-state").textContent = system.control?.globallyPaused
     ? "Global pausiert"
-    : "Lokale Versandsperre aktiv";
+    : system.runtime.liveSendEnabled ? 'Versandbedingungen werden laufend geprüft' : "Lokale Versandsperre aktiv";
+  const live=system.runtime.liveSendEnabled&&!system.control?.globallyPaused&&autopilotState.settings.mode==='live'&&!autopilotState.settings.paused;
+  $('live-active').textContent=live?'Aktiv':'Aus';
+  $('overview-send-state').textContent=live?'Live aktiviert':'Versand gesperrt';
+  $('overview-safety-title').textContent=live?'Livebetrieb unter Versandkontrollen.':'Sicher vorbereiten. Noch nicht versenden.';
   renderContacts();
   renderCampaigns();
   renderMessages();
+  renderCategories();
   $("activity").replaceChildren();
   if (!data.audit.length)
     empty(
@@ -382,13 +441,108 @@ $("review-form").onsubmit = (event) => {
     note("Prüfung und Versandgrundlage dokumentiert.");
   });
 };
-$("new-campaign").onclick = () => $("campaign-dialog").showModal();
+function fillCategories(select, value = "general") {
+  select.replaceChildren(
+    ...data.categories.map((c) => {
+      const option = el("option", c.name);
+      option.value = c.id;
+      return option;
+    }),
+  );
+  select.value = value;
+}
+function fallbackNote(keys = []) {
+  const names = {
+    salutation: "neutrale Anrede",
+    company: "neutraler Firmenbezug",
+    executionIntro: "neutraler Einstieg",
+    evidence: "neutraler Einstieg",
+    firstName: "Vorname",
+    lastName: "Nachname",
+    role: "Rolle",
+  };
+  return keys.length
+    ? `Ersatztexte verwendet: ${keys.map((k) => names[k] || k).join(", ")}`
+    : "Alle verwendeten Angaben vorhanden.";
+}
+function renderCategories() {
+  $("category-list").replaceChildren();
+  for (const category of data.categories) {
+    const card = el("article", undefined, "panel");
+    card.append(
+      el("h3", category.name),
+      el("p", category.subjectTemplate),
+      el(
+        "small",
+        `${data.contacts.filter((c) => c.categoryId === category.id).length} Kontakte · ${category.signatureText ? "Signatur hinterlegt" : "Signatur fehlt"}`,
+      ),
+      button("Standardmail bearbeiten", () => {
+        $("category-id").value = category.id;
+        const f = $("category-form");
+        f.elements.name.value = category.name;
+        f.elements.subject.value = category.subjectTemplate;
+        f.elements.body.value = category.bodyTemplate;
+        f.elements.signature.value = category.signatureText;
+        f.elements.useLogo.checked = category.useLogo;
+        $("category-dialog").showModal();
+      }),
+    );
+    $("category-list").append(card);
+  }
+}
+function useCategory() {
+  const category = data.categories.find(
+    (c) => c.id === $("campaign-category").value,
+  );
+  const form = $("campaign-form");
+  form.elements.subject.value = category.subjectTemplate;
+  form.elements.body.value = category.bodyTemplate;
+  form.elements.signature.value = category.signatureText;
+  form.elements.useLogo.checked = category.useLogo;
+}
+$("new-campaign").onclick = () => {
+  $("campaign-form").reset();
+  fillCategories($("campaign-category"));
+  useCategory();
+  $("campaign-dialog").showModal();
+};
+$("campaign-category").onchange = useCategory;
+$("category-form").onsubmit = (event) => {
+  event.preventDefault();
+  action(async () => {
+    await api(`/v1/categories/${$("category-id").value}`, {
+      ...Object.fromEntries(new FormData(event.target)),
+      useLogo: event.target.elements.useLogo.checked,
+    });
+    $("category-dialog").close();
+    await refresh();
+    note(
+      "Standardmail gespeichert. Bestehende Kampagnen und Nachrichten bleiben unverändert.",
+    );
+  });
+};
+$("profile-form").onsubmit = (event) => {
+  event.preventDefault();
+  action(async () => {
+    const fields = Object.fromEntries(new FormData(event.target));
+    await api(`/v1/contacts/${$("profile-id").value}/profile`, {
+      ...fields,
+      language:fields.language || null,
+      introVerified: event.target.elements.introVerified.checked,
+      isTestData: event.target.elements.isTestData.checked,
+    });
+    $("profile-dialog").close();
+    await refresh();
+    note("Personalisierung gespeichert. Keine Versandfreigabe erteilt.");
+  });
+};
 $("campaign-form").onsubmit = (event) => {
   event.preventDefault();
   action(async () => {
     const fields = Object.fromEntries(new FormData(event.target));
     await api("/v1/campaigns", {
       ...fields,
+      useLogo: event.target.elements.useLogo.checked,
       countries: fields.countries
         .split(",")
         .map((x) => x.trim().toUpperCase())
@@ -414,6 +568,69 @@ $("approve-message").onclick = () =>
     note("Genauer Nachrichteninhalt freigegeben. Kein Versand ausgelöst.");
   });
 action(async () => {
-  await api("/local/session", {});
+  try { await api("/local/session", {}); } catch { show('autopilot');note('Bitte zuerst mit dem Betreiberpasswort anmelden.');return; }
   await refresh();
+});
+
+let autopilotState=null,libraryVersion=null,exceptionOffset=0,runOffset=0;
+let consoleOffset=0;
+$('load-more-records').onclick=()=>action(async()=> {
+  const next=await api(`/v1/console?limit=100&offset=${consoleOffset}`);consoleOffset+=100;
+  for(const key of ['contacts','campaigns','messages','imports','audit']) data[key].push(...next[key]);
+  renderContacts();renderCampaigns();renderMessages();
+  $('load-more-records').disabled=Math.max(...['contacts','campaigns','messages','imports','audit'].map(k=>next[k].length))<100;
+  note(`${data.contacts.length} von ${data.totals.contacts} Kontakten geladen. Die Suche filtert die geladenen Einträge.`);
+});
+const blockerNames={
+  operator_login_not_configured:'Betreiberpasswort noch nicht eingerichtet',runtime_live_send_disabled:'Microsoft-Liveversand ist in der Laufzeit deaktiviert',
+  MAILBOX_CONNECTION_ID_required:'Geprüfte Postfachverbindung noch nicht hinterlegt',autopilot_mailbox_not_bound:'Autopilot noch nicht an das geprüfte Postfach gebunden',
+  certificate_auth_required:'Zertifikatanmeldung für diesen Betrieb noch nicht eingerichtet',sixteen_templates_not_approved:'Die 16 Sprach-/Sequenzvorlagen sind noch nicht vollständig freigegeben',
+  previous_outreach_not_reconciled:'Frühere Anschreiben müssen zuerst abgeglichen werden',startup_reconciliation_required:'Postfachabgleich nach Start noch offen',
+  mailbox_sync_incomplete_or_stale:'Postfachabgleich fehlt, läuft noch oder ist veraltet',uncertain_provider_operations:'Unklarer Microsoft-Vorgang muss geklärt werden',
+  no_reviewed_country_send_rule:'Keine geprüfte länderspezifische Versandregel vorhanden',
+  autopilot_campaign_not_prepared:'Der Hintergrundplaner muss zuerst die Autopilot-Kampagne vorbereiten',
+  mailbox_identity_evidence_expired_or_missing:'Postfachnachweis fehlt in dieser Laufzeit oder muss erneuert werden',
+  previous_outreach_status_uncertain:'Frühere Recherche/Vorbereitung – vor neuem Erstanschreiben prüfen',previously_contacted:'Bereits kontaktiert – keine neue Erstmail',
+  'check_missing:shadow_day':'Ein vollständiger Schattenlauf fehlt','check_missing:own_address_threading_logo_reply_unsubscribe':'Funktionstest mit eigenen Adressen fehlt',
+  'check_missing:backup_restore':'Wiederherstellungstest noch nicht bestätigt','check_missing:mailbox_scope':'Postfachbeschränkung noch nicht bestätigt','check_missing:pilot_review':'Pilotprüfung noch offen',
+};
+async function refreshAutopilot() {
+  const [state,preflight,templates]=await Promise.all([api('/v1/autopilot'),api('/v1/autopilot/preflight'),api('/v1/templates/versions?limit=100')]);
+  autopilotState=state;
+  $('operator-setup').hidden=!preflight.blockers.includes('operator_login_not_configured');
+  const modes={simulator:'Simulator',shadow:'Schattenbetrieb',live:'Livebetrieb'};
+  $('runtime-mode').textContent=modes[state.settings.mode];$('runtime-note').textContent=state.settings.paused?'Versand pausiert. Keine automatische Wiederaufnahme.':state.settings.mode==='live'?'Versand nur nach erneuter Prüfung aller Voraussetzungen.':'Keine ausgehenden Mailoperationen.';
+  const reason=state.settings.pauseReason==='Runtime startup: reconciliation required'?'Nach Start: Postfachabgleich erforderlich':state.settings.pauseReason;
+  $('autopilot-state').textContent=`${modes[state.settings.mode]} · ${state.settings.paused?'pausiert':'aktiv'} · Tagesgrenze ${Math.min(state.settings.dailyTarget,state.settings.pilotLimit,50)} · ${reason}`;
+  const metrics=$('autopilot-metrics');metrics.replaceChildren();
+  for(const [label,value] of [['Firmen',state.coverage.companies],['Kontaktprüfung offen',state.coverage.missingContacts],['Versandgrundlage fehlt',state.coverage.missingBasis],['Klärungsfälle',state.exceptions]]) {const card=el('article');card.append(el('p',label),el('strong',value));metrics.append(card);}
+  $('autopilot-blockers').replaceChildren(...[...preflight.blockers,...preflight.warnings].map(code=>el('li',blockerNames[code]||code)));
+  if(preflight.ready) $('autopilot-blockers').append(el('li','Betriebsprüfung bestanden. Aktivierung bleibt eine ausdrückliche Betreiberentscheidung.'));
+  const form=$('autopilot-settings');
+  for(const key of ['mode','mailboxConnectionId','dailyTarget','pilotLimit']) form.elements[key].value=state.settings[key]??'';
+  form.elements.researchEnabled.checked=state.settings.researchEnabled;
+  $('autopilot-activate').disabled=!preflight.ready||state.settings.mode!=='live';
+  const container=$('autopilot-templates');container.replaceChildren();
+  const categoryNames={bank:'Banken',broker:'Broker & Wertpapierfirmen',asset_manager:'Asset Manager',general:'Allgemein'};
+  for(const t of templates.items) container.append(button(`${categoryNames[t.categoryId]} · ${t.language.toUpperCase()} · ${t.step?'Nachfrage':'Erstmail'} · v${t.version} · ${labels[t.status]||t.status}`,()=> {
+    libraryVersion=t;const f=$('library-form');for(const key of ['subject','body','signature']) f.elements[key].value=t[key];f.elements.useLogo.checked=t.useLogo;
+    $('library-title').textContent=`${t.categoryId} · ${t.language.toUpperCase()} · ${t.step?'Nachfrage':'Erstmail'}`;
+    $('library-status').textContent=`Version ${t.version}: ${labels[t.status]||t.status}. Freigabe gilt ausschließlich für den gespeicherten Inhalt.`;
+    $('library-approve').disabled=t.status!=='draft';$('library-dialog').showModal();
+  }));
+  await Promise.all([loadExceptions(true),loadRuns(true)]);
+}
+async function loadExceptions(reset=false) {if(reset) {exceptionOffset=0;$('autopilot-exceptions').replaceChildren();}const page=await api(`/v1/exceptions?limit=50&offset=${exceptionOffset}`);for(const item of page.items) $('autopilot-exceptions').append(el('p',`${item.companyName||'Betrieb'} · ${blockerNames[item.code]||item.code} · ${new Date(item.createdAt).toLocaleDateString('de-DE')}`));exceptionOffset+=page.items.length;$('exceptions-next').disabled=page.items.length<50;}
+async function loadRuns(reset=false) {if(reset) {runOffset=0;$('autopilot-runs').replaceChildren();}const page=await api(`/v1/research/runs?limit=50&offset=${runOffset}`);for(const item of page.items) $('autopilot-runs').append(el('p',`${item.kind} · ${item.status} · ${new Date(item.startedAt).toLocaleString('de-DE')}${item.error?` · ${item.error}`:''}`));runOffset+=page.items.length;$('runs-next').disabled=page.items.length<50;}
+$('exceptions-next').onclick=()=>action(()=>loadExceptions());$('runs-next').onclick=()=>action(()=>loadRuns());
+$('operator-login').onsubmit=event=> {event.preventDefault();action(async()=>{await api('/local/operator/login',{password:event.target.elements.password.value});event.target.reset();await refresh();note('Betreiberanmeldung erfolgreich. Versand unverändert.');});};
+$('operator-setup').onsubmit=event=> {event.preventDefault();action(async()=>{const fields=event.target.elements;if(fields.password.value!==fields.repeat.value) throw new Error('Die beiden Passwörter stimmen nicht überein.');await api('/local/operator/setup',{password:fields.password.value,confirmation:'CREATE_LOCAL_OPERATOR'});event.target.reset();await refresh();note('Passwort eingerichtet. Jetzt anmelden; vor dem Schattenbetrieb den lokalen Supervisor neu starten. Keine Versandaktivierung.');});};
+$('autopilot-settings').onsubmit=event=> {event.preventDefault();action(async()=>{const f=event.target.elements;await api('/v1/autopilot/configure',{version:autopilotState.settings.version,mode:f.mode.value,researchEnabled:f.researchEnabled.checked,mailboxConnectionId:f.mailboxConnectionId.value.trim()||null,dailyTarget:Number(f.dailyTarget.value),pilotLimit:Number(f.pilotLimit.value),actor:f.actor.value,confirmation:'SAVE_PAUSED_CONFIGURATION'});await refresh();note('Einstellungen gespeichert. Versand bleibt pausiert.');});};
+$('autopilot-pause').onclick=()=>action(async()=>{await api('/v1/autopilot/pause',{actor:$('autopilot-settings').elements.actor.value,reason:'Manuelle Pause im Dashboard'});await refresh();});
+$('autopilot-activate').onclick=()=>action(async()=>{if(!confirm('Livebetrieb ausdrücklich aktivieren? Geprüfte Nachrichten können anschließend versendet werden.')) return;await api('/v1/autopilot/activate',{version:autopilotState.settings.version,actor:$('autopilot-settings').elements.actor.value,confirmation:'ACTIVATE_LIVE_AUTOPILOT'});await refresh();});
+$('library-form').onsubmit=event=> {event.preventDefault();action(async()=>{const f=event.target.elements;await api('/v1/templates/versions',{categoryId:libraryVersion.categoryId,language:libraryVersion.language,step:libraryVersion.step,subject:f.subject.value,body:f.body.value,signature:f.signature.value,useLogo:f.useLogo.checked});$('library-dialog').close();await refresh();note('Neue Entwurfsversion gespeichert. Noch nicht freigegeben.');});};
+$('library-approve').onclick=()=>action(async()=> {
+  const f=$('library-form').elements;if(['subject','body','signature'].some(k=>f[k].value!==libraryVersion[k])||f.useLogo.checked!==libraryVersion.useLogo) throw new Error('Änderungen zuerst als neue Version speichern und anschließend öffnen.');
+  if(!confirm('Genau diese gespeicherte Vorlage für automatische Vorbereitung freigeben?')) return;
+  await api(`/v1/templates/versions/${libraryVersion.id}/approve`,{actor:$('autopilot-settings').elements.actor.value,confirmation:'APPROVE_TEMPLATE_VERSION'});$('library-dialog').close();await refresh();
 });

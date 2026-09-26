@@ -459,6 +459,13 @@ td button {
 .card-grid .panel button {
   margin: 4px 6px 4px 0;
 }
+#category-list .panel > small {
+  display: block;
+  margin-bottom: 12px;
+}
+#category-list {
+  margin-top: 20px;
+}
 .card-grid > .empty {
   grid-column: 1/-1;
 }
@@ -527,9 +534,15 @@ pre {
   font-size: 12px;
 }
 .mail-preview {
-  font: 14px/1.9 inherit;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
   border-top: 1px solid #e3e8ec;
   padding: 22px 0;
+}
+#preview-logo {
+  max-width: 100%;
+  height: auto;
 }
 dialog {
   border: 1px solid #dbe3e7;

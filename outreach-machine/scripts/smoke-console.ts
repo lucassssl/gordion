@@ -154,6 +154,97 @@ try {
     await sql`SELECT * FROM contacts WHERE email = ${payload.contacts[0]!.email}`;
   assert.equal(contact!.reviewStatus, "needs_review");
   assert.equal(contact!.outreachBasis, null);
+  const consoleData = (
+    await app.inject({ url: "/v1/console", headers: admin })
+  ).json();
+  assert.equal(consoleData.categories.length, 4);
+  const defaultCategory = consoleData.categories.find(
+    (c: { id: string }) => c.id === "general",
+  );
+  const categoryDefaults = {
+    name: defaultCategory.name,
+    subject: defaultCategory.subjectTemplate,
+    body: defaultCategory.bodyTemplate,
+    signature: "Synthetic signature only",
+  };
+  assert.equal(
+    (
+      await app.inject({
+        method: "POST",
+        url: "/v1/categories/general",
+        headers: research,
+        payload: categoryDefaults,
+      })
+    ).statusCode,
+    403,
+  );
+  assert.equal(
+    (
+      await app.inject({
+        method: "POST",
+        url: "/v1/categories/general",
+        headers: admin,
+        payload: {
+          ...categoryDefaults,
+          body: "Hello {{misspelled}} invalid template",
+        },
+      })
+    ).statusCode,
+    400,
+  );
+  assert.equal(
+    (
+      await app.inject({
+        method: "POST",
+        url: "/v1/categories/general",
+        headers: admin,
+        payload: categoryDefaults,
+      })
+    ).statusCode,
+    200,
+  );
+  const preview = (
+    await app.inject({
+      method: "POST",
+      url: `/v1/contacts/${contact!.id}/preview`,
+      headers: admin,
+      payload: {},
+    })
+  ).json();
+  assert.ok(preview.bodyText.startsWith("Guten Tag Test,"));
+  assert.ok(!preview.bodyText.includes("Synthetic only; never"));
+  assert.ok(preview.fallbacks.includes("executionIntro"));
+  const profile = {
+    firstName: "Test",
+    lastName: "Beispiel",
+    honorific: "frau",
+    categoryId: "general",
+    executionIntro: "Geprüfter synthetischer Einstieg.",
+    introSourceUrl: "https://example.test",
+    introVerified: true,
+    isTestData: true,
+  };
+  assert.equal(
+    (
+      await app.inject({
+        method: "POST",
+        url: `/v1/contacts/${contact!.id}/profile`,
+        headers: admin,
+        payload: profile,
+      })
+    ).statusCode,
+    200,
+  );
+  const personalized = (
+    await app.inject({
+      method: "POST",
+      url: `/v1/contacts/${contact!.id}/preview`,
+      headers: admin,
+      payload: {},
+    })
+  ).json();
+  assert.ok(personalized.bodyText.startsWith("Sehr geehrte Frau Beispiel,"));
+  assert.ok(personalized.bodyText.includes(profile.executionIntro));
   const campaign = await app.inject({
     method: "POST",
     url: "/v1/campaigns",
@@ -163,6 +254,7 @@ try {
       subject: "Hello {{company}}",
       body: "Hello {{firstName}}, this is a synthetic preview only.",
       signature: "Synthetic test signature only",
+      useLogo: true,
       legalReference: "Own synthetic test addresses only",
       countries: ["DE"],
       initialLimit: 5,
@@ -192,6 +284,36 @@ try {
     },
   });
   assert.equal(review.statusCode, 200, review.body);
+  const bankCampaign = await app.inject({
+    method: "POST",
+    url: "/v1/campaigns",
+    headers: admin,
+    payload: {
+      name: "Synthetic bank category",
+      categoryId: "bank",
+      subject: "Banken {{company}}",
+      body: "{{salutation}}\n\n{{executionIntro}}",
+      signature: "Synthetic signature",
+      legalReference: "Own synthetic test addresses only",
+      countries: ["DE"],
+      initialLimit: 5,
+      totalLimit: 5,
+      confirmation: "APPROVE_TEMPLATE_ONLY",
+      useLogo: true,
+    },
+  });
+  assert.equal(bankCampaign.statusCode, 200, bankCampaign.body);
+  assert.equal(
+    (
+      await app.inject({
+        method: "POST",
+        url: `/v1/campaigns/${bankCampaign.json().id}/prepare`,
+        headers: admin,
+        payload: {},
+      })
+    ).json().prepared,
+    0,
+  );
   const prepared = await prepare();
   assert.equal(prepared.statusCode, 200, prepared.body);
   assert.equal(prepared.json().prepared, 1);
@@ -199,6 +321,35 @@ try {
   const [message] =
     await sql`SELECT m.* FROM messages m JOIN enrollments e ON e.id = m.enrollment_id WHERE e.campaign_id = ${campaignId}`;
   assert.equal(message!.status, "awaiting_approval");
+  assert.match(message!.logoSha256, /^[a-f0-9]{64}$/);
+  assert.equal(
+    (
+      await app.inject({
+        method: "POST",
+        url: "/v1/categories/general",
+        headers: admin,
+        payload: {
+          ...categoryDefaults,
+          body: "Changed default {{salutation}}",
+        },
+      })
+    ).statusCode,
+    200,
+  );
+  const [unchanged] =
+    await sql`SELECT final_body_text FROM messages WHERE id=${message!.id}`;
+  assert.equal(unchanged!.finalBodyText, message!.finalBodyText);
+  assert.equal(
+    (
+      await app.inject({
+        method: "POST",
+        url: `/v1/contacts/${contact!.id}/profile`,
+        headers: admin,
+        payload: { ...profile, categoryId: "bank" },
+      })
+    ).statusCode,
+    409,
+  );
   const approve = await app.inject({
     method: "POST",
     url: `/v1/messages/${message!.id}/approve`,

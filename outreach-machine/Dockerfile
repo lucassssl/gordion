@@ -15,5 +15,6 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY ui ./ui
 COPY migrations ./migrations
+COPY assets ./assets
 USER node
 CMD ["node", "dist/src/server.js"]

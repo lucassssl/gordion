@@ -45,9 +45,17 @@ async function main() {
   execFileSync("docker", ["compose", "up", "-d", "--wait", "--wait-timeout", "60", "postgres"], {
     stdio: "inherit", timeout: 90_000,
   });
+  const {createDatabase}=await import('../src/db.js');
+  const {createLocalBackup}=await import('../src/services/local-backup.js');
+  const startupSql=createDatabase({DATABASE_URL:process.env.DATABASE_URL!});
+  try {
+    const [existing]=await startupSql`SELECT to_regclass('companies') IS NOT NULL AS exists`;
+    if(existing!.exists) await createLocalBackup(startupSql,process.env.DATABASE_URL!,false);
+  } finally {await startupSql.end({timeout:5});}
   await import("./migrate.js");
   console.log(`Local dashboard: ${baseUrl} – simulator only, no mail sending.`);
-  await import("../src/server.js");
+  try { process.loadEnvFile('.outreach-data/operator.env'); } catch (error) { if((error as NodeJS.ErrnoException).code!=='ENOENT') throw error; }
+  await import("./supervisor.js");
 }
 
 main().catch(() => {

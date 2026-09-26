@@ -1,6 +1,6 @@
 import type { Database } from "../db.js";
 import { contentHash, validateFinalContent } from "../domain/message.js";
-import { renderTemplate } from "../domain/intake.js";
+import { personalize } from "../domain/personalization.js";
 
 // Database-only scheduler. It never talks to a mail provider or enables sending.
 export async function prepareCampaign(
@@ -30,12 +30,15 @@ export async function prepareCampaign(
     )
       return { prepared: 0, skipped: 0 };
     const candidates =
-      await tx`SELECT ct.id, ct.company_id, ct.email, ct.first_name, co.name, co.execution_evidence,
+      await tx`SELECT ct.id, ct.company_id, ct.email, ct.first_name, ct.last_name, ct.honorific,
+      ct.role_title, ct.execution_intro, ct.intro_source_url, ct.intro_verified_at, co.name,
       a.id AS authorization_id
       FROM contacts ct JOIN companies co ON co.id = ct.company_id
-      JOIN LATERAL (SELECT id FROM outreach_authorizations WHERE contact_id = ct.id AND revoked_at IS NULL
+      JOIN LATERAL (SELECT id, basis FROM outreach_authorizations WHERE contact_id = ct.id AND revoked_at IS NULL
         AND valid_until > now() ORDER BY verified_at DESC LIMIT 1) a ON true
       WHERE ct.review_status = 'eligible' AND co.review_status = 'eligible' AND co.fit_tier IN ('A', 'B')
+        AND (${campaign.categoryId ?? null}::text IS NULL OR ct.category_id = ${campaign.categoryId ?? null})
+        AND (NOT ct.is_test_data OR a.basis = 'own_test_address')
         AND co.country_code::text = ANY(${campaign.targetCountries}::text[])
         AND ct.source_checked_at > now() - interval '90 days'
         AND NOT EXISTS (SELECT 1 FROM enrollments e WHERE e.company_id = co.id AND e.status <> 'cancelled')
@@ -52,20 +55,25 @@ export async function prepareCampaign(
         skipped++;
         continue;
       }
-      const values = {
-        company: contact.name,
-        firstName: contact.firstName || "Team",
-        evidence: contact.executionEvidence || "",
-      };
       let subject: string, bodyText: string;
+      let fallbacks: string[];
       try {
-        subject = renderTemplate(template.subjectTemplate, values);
-        bodyText = `${renderTemplate(template.bodyTextTemplate, values)}\n\n${campaign.signatureText}`;
+        ({ subject, bodyText, fallbacks } = personalize(
+          contact,
+          template.subjectTemplate,
+          template.bodyTextTemplate,
+          campaign.signatureText,
+        ));
       } catch {
         skipped++;
         continue;
       }
-      const content = { recipientAddress: contact.email, subject, bodyText };
+      const content = {
+        recipientAddress: contact.email,
+        subject,
+        bodyText,
+        logoSha256: campaign.logoSha256,
+      };
       if (validateFinalContent(content).length) {
         skipped++;
         continue;
@@ -77,10 +85,10 @@ export async function prepareCampaign(
       const [message] =
         await tx`INSERT INTO messages (enrollment_id, template_id, sequence_index, message_kind,
         status, recipient_address, final_subject, final_body_text, content_sha256, due_at,
-        approved_at, approved_by, approval_content_sha256, authorization_id)
+        approved_at, approved_by, approval_content_sha256, authorization_id, personalization_fallbacks, logo_sha256)
         VALUES (${enrollment!.id}, ${template.id}, 0, 'initial', ${automatic ? "approved" : "awaiting_approval"},
         ${contact.email}, ${subject}, ${bodyText}, ${digest}, now(), ${automatic ? new Date() : null},
-        ${automatic ? "campaign-policy" : null}, ${automatic ? digest : null}, ${contact.authorizationId}) RETURNING id`;
+        ${automatic ? "campaign-policy" : null}, ${automatic ? digest : null}, ${contact.authorizationId}, ${tx.json(fallbacks)}, ${campaign.logoSha256}) RETURNING id`;
       await tx`INSERT INTO audit_events (entity_type, entity_id, event_type, actor_type, actor_id, detail)
         VALUES ('message', ${message!.id}, ${automatic ? "message.policy_approved" : "message.prepared"}, 'system', 'preparation',
         ${tx.json({ campaignId, templateId: template.id, authorizationId: contact.authorizationId, contentSha256: digest })})`;

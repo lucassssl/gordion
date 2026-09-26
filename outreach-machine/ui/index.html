@@ -21,13 +21,14 @@
         ><button data-view="campaigns">03 <span>Kampagnen</span></button
         ><button data-view="messages">04 <span>Nachrichten</span></button
         ><button data-view="imports">05 <span>Recherche & Import</span></button>
+        <button data-view="categories">
+          06 <span>Kategorien & Vorlagen</span>
+        </button>
+        <button data-view="autopilot">07 <span>Autopilot</span></button>
       </nav>
       <div class="side-note">
-        <span class="dot"></span> Lokaler Simulator
-        <p>
-          Keine Nachricht verlässt dieses System. Microsoft-Versand ist
-          deaktiviert.
-        </p>
+        <span class="dot"></span> <span id="runtime-mode">Lokaler Betrieb</span>
+        <p id="runtime-note">Der aktuelle Versandstatus wird beim Laden geprüft.</p>
       </div>
     </aside>
     <main>
@@ -35,10 +36,31 @@
         <span>WORKSPACE / <strong id="breadcrumb">Übersicht</strong></span>
         <div>
           <span class="pill">Nur lokal</span
-          ><button id="refresh" class="quiet">Aktualisieren ↻</button>
+          ><button id="refresh" class="quiet">Aktualisieren ↻</button><button id="load-more-records" class="quiet">Weitere Einträge laden</button>
         </div>
       </header>
       <div id="notice" role="status" aria-live="polite" hidden></div>
+      <section id="autopilot" class="view" hidden>
+        <div class="page-title"><div><p class="eyebrow">EU OUTREACH</p><h1>Autopilot</h1><p>Recherche, freigegebene Texte und kontrollierter Versand. Unklare Fälle bleiben zurückgestellt.</p></div><button id="autopilot-pause" class="quiet">Versand pausieren</button></div>
+        <div class="metrics" id="autopilot-metrics"></div>
+        <article class="panel"><h2>Betriebsprüfung</h2><p id="autopilot-state"></p><ul id="autopilot-blockers"></ul></article>
+        <article class="panel"><h2>Betreiberanmeldung</h2><p>Für Einstellungen und Freigaben ist ein separates Betreiberpasswort erforderlich. Die Entwicklungsanmeldung genügt nicht.</p>
+          <form id="operator-setup" hidden><label>Neues lokales Betreiberpasswort<input name="password" type="password" autocomplete="new-password" minlength="16" required></label><label>Passwort wiederholen<input name="repeat" type="password" autocomplete="new-password" minlength="16" required></label><button type="submit">Betreiberpasswort einrichten</button><p>Mindestens 16 Zeichen. Nur auf diesem Mac gespeichert, ausschließlich als gesalzener Passwort-Hash.</p></form>
+          <form id="operator-login"><label>Passwort<input name="password" type="password" autocomplete="current-password" minlength="16" required></label><button type="submit">Anmelden</button></form>
+        </article>
+        <article class="panel"><h2>Betriebseinstellungen</h2><form id="autopilot-settings">
+          <label>Betriebsart<select name="mode"><option value="simulator">Simulator – keine Mailoperationen</option><option value="shadow">Schattenbetrieb – nur lesen</option><option value="live">Live – Freigabe erforderlich</option></select></label>
+          <label><input name="researchEnabled" type="checkbox"> Öffentliche Recherche im Hintergrund aktivieren</label>
+          <label>Geprüfte Postfachverbindung<input name="mailboxConnectionId" placeholder="Verbindungs-ID aus der Einrichtung"></label>
+          <label>Tagesziel<input name="dailyTarget" type="number" min="1" max="50" value="45"></label>
+          <label>Aktuelle Pilotgrenze<input name="pilotLimit" type="number" min="1" max="50" value="10"></label>
+          <label>Verantwortlicher Betreiber<input name="actor" value="Lucas" required></label>
+          <button type="submit">Einstellungen speichern · pausiert</button><button id="autopilot-activate" type="button" class="quiet">Livebetrieb ausdrücklich aktivieren</button>
+        </form><p>45 ist das Tagesziel; der Pilot bleibt zunächst auf höchstens 10 beschränkt. Alle Kategorien und Follow-ups teilen ein Budget.</p></article>
+        <article class="panel"><h2>Versionierte Vorlagen</h2><p>Vier Kategorien, Deutsch und Englisch, jeweils Erstmail und eine Nachfrage. Änderungen erzeugen eine neue Version.</p><div id="autopilot-templates"></div></article>
+        <article class="panel"><h2>Klärungsfälle</h2><div id="autopilot-exceptions"></div><button id="exceptions-next" class="quiet">Weitere Klärungsfälle</button></article>
+        <article class="panel"><h2>Rechercheläufe</h2><div id="autopilot-runs"></div><button id="runs-next" class="quiet">Weitere Läufe</button></article>
+      </section>
       <section id="overview" class="view">
         <div class="page-title">
           <div>
@@ -55,18 +77,18 @@
         <div class="safety-banner">
           <span class="safety-icon">✓</span>
           <div>
-            <strong>Sicher vorbereiten. Noch nicht versenden.</strong>
+            <strong id="overview-safety-title">Sicher vorbereiten. Noch nicht versenden.</strong>
             <p>
               Recherche-Import, Prüfung und Nachrichtenvorschau sind getrennt
               vom Liveversand.
             </p>
           </div>
-          <span class="pill amber">Versand gesperrt</span>
+          <span class="pill amber" id="overview-send-state">Versand gesperrt</span>
         </div>
         <div class="metrics">
           <article>
             <span>Kontakte</span><strong id="metric-contacts">—</strong
-            ><small>im angezeigten Bestand</small>
+            ><small>im gesamten Bestand</small>
           </article>
           <article>
             <span>Versandgrundlage geprüft</span
@@ -79,7 +101,7 @@
             ><small>noch kein Zustellnachweis</small>
           </article>
           <article>
-            <span>Aktiver Liveversand</span><strong>Aus</strong
+            <span>Aktiver Liveversand</span><strong id="live-active">Aus</strong
             ><small id="pause-state">System wird geprüft</small>
           </article>
         </div>
@@ -94,7 +116,7 @@
                 <i>1</i>
                 <div>
                   <strong>Neue Kontakte finden</strong>
-                  <p>Rechercheanbindung noch offen. Keine Suche aktiv.</p>
+                  <p>Öffentliche ESMA- und Website-Recherche im Autopilot steuerbar.</p>
                 </div>
                 <span class="tag amber">Offen</span>
               </li>
@@ -213,6 +235,26 @@
         </div>
       </section>
 
+      <section id="categories" class="view" hidden>
+        <div class="page-title">
+          <div>
+            <p class="eyebrow">PERSONALISIERUNG</p>
+            <h1>Die passende Mail für jeden Lead.</h1>
+            <p>
+              Vier anpassbare Kategorien. Unbekannte Angaben werden neutral
+              ersetzt.
+            </p>
+          </div>
+        </div>
+        <div class="callout">
+          Ohne bestätigtes Herr/Frau: „Guten Tag Vorname Nachname,“ mit den
+          vorhandenen Namen, ganz ohne Namen: „Guten Tag,“. Firmeneinstieg ohne
+          geprüfte Quelle: neutraler Gordion-Einstieg. Nicht zugeordnete Leads:
+          Allgemein. Keine Behauptungen aus internen Recherchehinweisen.
+        </div>
+        <div id="category-list" class="card-grid"></div>
+      </section>
+
       <section id="campaigns" class="view" hidden>
         <div class="page-title">
           <div>
@@ -322,10 +364,10 @@
               <li>Importierte Nachweise erteilen keine Versandfreigabe</li>
             </ul>
             <div class="callout">
-              <strong>Noch zu verbinden</strong>
+              <strong>Im Autopilot vorbereitet</strong>
               <p>
-                Suchquelle, Suchprofil, Zeitplan und gegebenenfalls API-Zugang.
-                Ein automatischer Suchlauf ist noch nicht eingerichtet.
+                Kostenlose ESMA- und Websitequellen, EU-Zielprofil und Abrufgrenzen sind hinterlegt.
+                Aktivierung und Fortschritt findest du unter Autopilot. Kein kostenpflichtiger API-Zugang erforderlich.
               </p>
             </div>
             <p class="muted">
@@ -341,10 +383,17 @@
       </section>
       <footer>
         Gordion Outreach · Lokaler Entwicklungsstand<span
-          >Keine Livekampagne · Kein Öffnungstracking</span
+          >Freigaben vor Versand · Kein Öffnungstracking</span
         >
       </footer>
     </main>
+    <dialog id="library-dialog"><form id="library-form"><h2 id="library-title">Vorlagenversion</h2>
+      <label>Betreff<input name="subject" maxlength="255" required></label>
+      <label>Nachricht<textarea name="body" rows="15" required></textarea></label>
+      <label>Signatur<textarea name="signature" rows="6" required></textarea></label>
+      <label><input name="useLogo" type="checkbox"> Gordion-Logo anhängen</label>
+      <p id="library-status"></p><div class="dialog-actions"><button type="button" data-close="library-dialog">Schließen</button><button type="submit">Als neue Entwurfsversion speichern</button><button id="library-approve" type="button">Diese Version freigeben</button></div>
+    </form></dialog>
 
     <dialog id="review-dialog">
       <form id="review-form">
@@ -401,6 +450,18 @@
           </button>
         </div>
         <label
+          >Kategorie<select
+            id="campaign-category"
+            name="categoryId"
+            required
+          ></select
+        ></label>
+        <p class="muted">
+          Die Standardmail wird beim Wechsel übernommen. Die Kampagne
+          berücksichtigt nur Kontakte dieser Kategorie. Bestehende Kampagnen
+          bleiben bei späteren Vorlagenänderungen unverändert.
+        </p>
+        <label
           >Name<input
             name="name"
             required
@@ -445,7 +506,7 @@
             rows="6"
             required
             minlength="20"
-            placeholder="Erlaubte Variablen: {{company}}, {{firstName}}, {{evidence}}"
+            placeholder="{{salutation}} und {{executionIntro}}; weitere Variablen: {{company}}, {{firstName}}, {{lastName}}, {{role}}. Eigener Ersatz: {{firstName|Team}}"
           ></textarea></label
         ><label
           >Geschäftliche Signatur<textarea
@@ -455,6 +516,9 @@
             minlength="8"
             placeholder="Noch offen – bitte finale Signatur hinterlegen."
           ></textarea></label
+        ><label class="checkbox"
+          ><input type="checkbox" name="useLogo" />Gordion-Logo unter der
+          Signatur einbetten</label
         ><label
           >Referenz zur Kampagnenprüfung<input
             name="legalReference"
@@ -484,6 +548,14 @@
       <p id="preview-recipient" class="muted"></p>
       <h3 id="preview-subject"></h3>
       <pre id="preview-body" class="mail-preview"></pre>
+      <img
+        id="preview-logo"
+        src="/gordion-logo.png"
+        width="320"
+        alt="Gordion"
+        hidden
+      />
+      <p id="preview-fallbacks" class="muted"></p>
       <p class="callout">
         Eine Freigabe speichert diesen genauen Inhalt. Der Versand bleibt im
         lokalen Modus deaktiviert.
@@ -491,6 +563,119 @@
       <button id="approve-message" class="primary">
         Diesen Inhalt freigeben
       </button>
+    </dialog>
+    <dialog id="category-dialog">
+      <form id="category-form">
+        <div class="dialog-title">
+          <h2>Standardmail bearbeiten</h2>
+          <button
+            type="button"
+            data-close="category-dialog"
+            aria-label="Schließen"
+          >
+            ×
+          </button>
+        </div>
+        <input id="category-id" type="hidden" />
+        <label
+          >Kategoriename<input
+            name="name"
+            required
+            minlength="2"
+            maxlength="100"
+        /></label>
+        <label>Betreff<input name="subject" required maxlength="255" /></label>
+        <label
+          >Standardmail<textarea
+            name="body"
+            required
+            rows="12"
+            minlength="20"
+          ></textarea>
+        </label>
+        <p class="muted">
+          {{salutation}}, {{company}}, {{executionIntro}}, {{firstName}},
+          {{lastName}}, {{role}}. Eigener Ersatztext: {{firstName|Team}}. Die
+          Anrede wird nicht aus dem Vornamen erraten. {{evidence}} ist nur ein
+          Alias für den geprüften Einstieg, keine rohe Recherche.
+        </p>
+        <label
+          >Signatur<textarea
+            name="signature"
+            rows="5"
+            maxlength="2000"
+          ></textarea>
+        </label>
+        <label class="checkbox"
+          ><input type="checkbox" name="useLogo" />Gordion-Logo unter der
+          Signatur einbetten</label
+        >
+        <p class="muted">
+          Gilt für neue Kampagnen und Kontaktvorschauen. Bereits freigegebene
+          Nachrichten werden nicht verändert.
+        </p>
+        <button class="primary" type="submit">Standardmail speichern</button>
+      </form>
+    </dialog>
+    <dialog id="profile-dialog">
+      <form id="profile-form">
+        <div class="dialog-title">
+          <h2>Kontakt personalisieren</h2>
+          <button
+            type="button"
+            data-close="profile-dialog"
+            aria-label="Schließen"
+          >
+            ×
+          </button>
+        </div>
+        <p id="profile-email"></p>
+        <input id="profile-id" type="hidden" />
+        <div class="form-row">
+          <label>Vorname<input name="firstName" maxlength="100" /></label
+          ><label>Nachname<input name="lastName" maxlength="100" /></label>
+        </div>
+        <label
+          >Anrede<select name="honorific">
+            <option value="neutral">Neutral / unbekannt</option>
+            <option value="herr">Herr – bestätigt</option>
+            <option value="frau">Frau – bestätigt</option>
+          </select></label
+        >
+        <label
+          >Kategorie<select name="categoryId" id="profile-category"></select
+        ></label>
+        <label
+          >Kontaktsprache<select name="language"><option value="">Automatisch nach Land</option><option value="de">Deutsch – ausdrücklich hinterlegt</option><option value="en">Englisch – ausdrücklich hinterlegt</option></select></label>
+        <label>Sprache des Einstiegs<select name="introLanguage"><option value="de">Deutsch</option><option value="en">Englisch</option></select></label>
+        <label
+          >Firmenspezifischer Einstieg<textarea
+            name="executionIntro"
+            rows="4"
+            maxlength="3000"
+            placeholder="Vollständiger, belegter Absatz – leer lassen für neutralen Ersatztext."
+          ></textarea>
+        </label>
+        <label
+          >Quelle für diesen Einstieg<input
+            name="introSourceUrl"
+            type="url"
+            maxlength="2000"
+        /></label>
+        <label class="checkbox"
+          ><input name="introVerified" type="checkbox" />Ich habe den Einstieg
+          anhand dieser Quelle geprüft und als Mailtext freigegeben.</label
+        >
+        <label class="checkbox"
+          ><input name="isTestData" type="checkbox" />Synthetischer Testkontakt
+          – nicht für echte Akquise verwenden.</label
+        >
+        <p class="muted">
+          Ändert weder Versandgrundlage noch Freigabestatus. Kontakte mit
+          laufender/offener Sequenz müssen zuerst gestoppt werden.
+        </p>
+        <button class="primary" type="submit">Kontaktdaten speichern</button>
+      </form>
     </dialog>
   </body>
 </html>

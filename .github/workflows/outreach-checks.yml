@@ -48,3 +48,5 @@ jobs:
       - run: npm run db:migrate
       - run: npm run smoke:worker
       - run: npm run smoke:console
+      - run: npm run smoke:autopilot
+      - run: npm run smoke:autopilot-faults
