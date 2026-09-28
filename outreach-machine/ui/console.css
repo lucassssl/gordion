@@ -552,7 +552,7 @@ pre {
   margin: 12px 0;
 }
 .signature-preview pre { font-family: Arial, sans-serif; font-size: 14px; line-height: 1.5; }
-#signature-logo-preview { display: block; width: 320px; max-width: 100%; height: auto; }
+#signature-logo-preview { display: block; width: 200px; max-width: 100%; height: auto; }
 #signature-logo-preview[hidden] { display: none; }
 dialog {
   border: 1px solid #dbe3e7;

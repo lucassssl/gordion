@@ -15,6 +15,14 @@ import type {
 } from "../src/repositories/message-repository.js";
 
 describe("signature logo and exact content", () => {
+  it('renders compact logos and still reads previously created 320px drafts',()=>{
+    const html=brandedHtml('Body');
+    expect(html).toContain('width="200"');
+    expect(html).toContain('width:200px;max-width:100%;height:auto');
+    expect(readBrandedText(html)).toBe('Body');
+    expect(readBrandedText(html.replaceAll('200','320'))).toBe('Body');
+    expect(()=>readBrandedText(html.replaceAll('200','999'))).toThrow();
+  });
   it("worker refuses a changed logo before the final send gate", async () => {
     const provider = new SimulatedMailProvider();
     const logo = readLogo();

@@ -20,7 +20,7 @@ export function brandedHtml(text: string) {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
-  return `<html><body><pre style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;white-space:pre-wrap">${escaped}</pre><img src="cid:${logoContentId}" alt="" width="320" style="width:320px;max-width:100%;height:auto"></body></html>`;
+  return `<html><body><pre style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;white-space:pre-wrap">${escaped}</pre><img src="cid:${logoContentId}" alt="" width="200" style="width:200px;max-width:100%;height:auto"></body></html>`;
 }
 // Fail closed if Outlook rewrites the supported layout or someone changes the draft.
 // Parse entities with an HTML parser, not regex or untrusted HTML execution.
@@ -60,11 +60,13 @@ export function readBrandedText(html: string): string {
       const style=node.attrs.find(a=>a.name==='style')?.value;
       if(style) {
         const expected:Record<string,string>=node.tagName==='pre'?{'font-family':'arial,sans-serif','font-size':'14px','line-height':'1.5','white-space':'pre-wrap'}:
-          node.tagName==='img'?{'width':'320px','max-width':'100%','height':'auto'}:{};
+          node.tagName==='img'?{'width':'200px','max-width':'100%','height':'auto'}:{};
         for(const declaration of style.split(';').filter(s=>s.trim())) {
           const colon=declaration.indexOf(':');const key=declaration.slice(0,colon).trim().toLowerCase();
           const value=declaration.slice(colon+1).replace(/[\s"']/g,'').toLowerCase();
-          if(colon<1 || expected[key]!==value) throw new Error('Unapproved mail styling');
+          // Previously created Outlook drafts retain their original 320px layout.
+          const legacyLogoWidth=node.tagName==='img' && key==='width' && value==='320px';
+          if(colon<1 || (expected[key]!==value && !legacyLogoWidth)) throw new Error('Unapproved mail styling');
         }
       }
       if (node.tagName === "pre") {
