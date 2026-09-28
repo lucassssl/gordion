@@ -258,7 +258,15 @@
           <p>Dieser feste Absenderblock gilt unverändert für alle Kategorien, Sprachen, Erstkontakte und Nachfragen. Keine Signatur mehr je Vorlage pflegen.</p>
           <form id="sender-signature-form">
             <label>Zentrale Signatur<textarea name="signatureText" rows="7" minlength="8" maxlength="4000" required></textarea></label>
-            <label class="checkbox"><input name="useLogo" type="checkbox"> Gordion-Logo unter der Signatur einbetten</label>
+            <label>Logo auswählen<input id="signature-logo-file" type="file" accept="image/png,.png" aria-describedby="signature-logo-help"></label>
+            <p id="signature-logo-help" class="muted">PNG, maximal 500 KB und 4 Millionen Pixel. Das Logo wird direkt in die Mail eingebettet, nicht extern nachgeladen.</p>
+            <label class="checkbox"><input name="useLogo" type="checkbox"> Logo unter der Signatur einbetten</label>
+            <p id="signature-logo-status" class="muted"></p>
+            <div class="signature-preview" aria-label="Signaturvorschau">
+              <strong>Vorschau</strong>
+              <pre id="signature-text-preview"></pre>
+              <img id="signature-logo-preview" alt="Ausgewähltes Signaturlogo" width="320" hidden>
+            </div>
             <label>Verantwortlicher Betreiber<input name="actor" value="Lucas" minlength="2" required></label>
             <p id="sender-signature-status" class="muted"></p>
             <button type="submit" class="primary">Signatur für alle neuen Entwürfe speichern</button>

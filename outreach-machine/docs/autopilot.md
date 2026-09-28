@@ -40,6 +40,10 @@ Danach Supervisor neu starten und unter **Autopilot → Betreiberanmeldung** anm
 
 ## Zentrale Signatur
 
+**Logo hochladen:** PNG unter „Logo auswählen“ auswählen (maximal 500 KB, 4096 Pixel je Seite, 4 Millionen Pixel insgesamt), Vorschau prüfen und „Signatur für alle neuen Entwürfe speichern“. Die Betreiberanmeldung ist erforderlich. Die Auswahl allein speichert noch nichts. Das bisherige Gordion-Logo bleibt bis zum Speichern erhalten. Abwählen von „Logo einbetten“ entfernt es aus neuen Nachrichten, ohne die Auswahl zu verlieren.
+
+Migration 008 ergänzt unveränderliche Logo-Assets in PostgreSQL. Hochgeladene PNGs werden geprüft und aus dekodierten Pixeln neu kodiert; keine SVGs, Animationen oder externen Bild-URLs. Assets sind Teil des Datenbankbackups. Vorschau und beide Graph-Entwurfspfade laden genau den im Nachrichtensnapshot gespeicherten Hash; ein späterer Upload verändert alte Nachrichten nicht. Logoabrufe unter `/v1/sender-signature/logos/:sha256` erfordern eine angemeldete Sitzung oder den vorhandenen Admin-Zugang.
+
 Unter **Kategorien & Vorlagen → Eine Signatur für alle Mailentwürfe** wird genau ein fester Absenderblock samt Logoauswahl gepflegt. Er gilt unverändert für alle vier Kategorien, DE/EN, Erstmail und Follow-up sowie für Kontaktvorschauen und manuell/automatisch vorbereitete Kampagnen. Keine automatische Übersetzung der Signatur.
 
 Migration 007 übernimmt die bisherige Signatur nur, wenn alle vier Kategorien exakt übereinstimmen. Uneinheitliche oder leere Altbestände bleiben zur zentralen Einrichtung offen. Es werden keine persönlichen Absenderangaben im Quellcode hinterlegt. Ändern erfordert die lokale Betreiberanmeldung; Speichern aktiviert weder Vorlagen noch Versand. Gleichzeitige Änderungen werden über eine Versionsprüfung abgesichert.

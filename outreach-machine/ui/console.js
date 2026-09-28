@@ -14,6 +14,8 @@ const labels = {
 };
 let data = { contacts: [], campaigns: [], messages: [] },
   selectedMessage = null;
+let pendingLogoFile=null, pendingLogoUrl=null;
+const logoUrl=hash=>`/v1/sender-signature/logos/${encodeURIComponent(hash)}`;
 function note(text, error = false) {
   $("notice").textContent = text;
   $("notice").classList.toggle("error", error);
@@ -31,6 +33,12 @@ async function api(url, body) {
     throw new Error(
       result.error === "invalid_input"
         ? `Bitte Eingaben prüfen: ${result.fields.join(", ")}`
+        : result.error === 'invalid_logo'
+          ? 'Bitte eine gültige PNG-Datei auswählen (maximal 500 KB, 4096 Pixel je Seite und 4 Millionen Pixel insgesamt).'
+        : result.error === 'operator_login_required'
+          ? 'Bitte zuerst unter Autopilot mit dem Betreiberpasswort anmelden.'
+        : result.error === 'signature_version_conflict'
+          ? 'Die Signatur wurde inzwischen geändert. Bitte aktualisieren und erneut prüfen.'
         : result.error === "batch_content_conflict"
           ? "Diese Lauf-ID wurde bereits mit anderen Daten verwendet."
           : `Aktion fehlgeschlagen (${response.status}). Keine Versandaktivierung.`,
@@ -176,6 +184,7 @@ function renderContacts() {
         $("preview-subject").textContent = preview.subject;
         $("preview-body").textContent = preview.bodyText;
         $("preview-logo").hidden = !preview.logoSha256;
+        if(preview.logoSha256) $('preview-logo').src=logoUrl(preview.logoSha256);
         $("preview-fallbacks").textContent =
           fallbackNote(preview.fallbacks) +
           (preview.signatureMissing ? " · Signatur fehlt noch." : "") +
@@ -298,6 +307,7 @@ function renderMessages() {
         $("preview-subject").textContent = message.finalSubject;
         $("preview-body").textContent = message.finalBodyText;
         $("preview-logo").hidden = !message.logoSha256;
+        if(message.logoSha256) $('preview-logo').src=logoUrl(message.logoSha256);
         $("preview-fallbacks").textContent = fallbackNote(
           message.personalizationFallbacks,
         );
@@ -469,6 +479,11 @@ function renderCategories() {
   const signature=data.senderSignature;
   $('sender-signature-form').elements.signatureText.value=signature.signatureText;
   $('sender-signature-form').elements.useLogo.checked=signature.useLogo;
+  pendingLogoFile=null;
+  if(pendingLogoUrl) URL.revokeObjectURL(pendingLogoUrl);
+  pendingLogoUrl=null;
+  $('signature-logo-file').value='';
+  updateSignaturePreview();
   $('sender-signature-status').textContent=signature.id?`Zentrale Signatur · Version ${signature.version} · gilt für alle neuen Entwürfe.`:'Noch keine zentrale Signatur. Nachrichtenvorbereitung bleibt gesperrt.';
   $("category-list").replaceChildren();
   for (const category of data.categories) {
@@ -623,7 +638,44 @@ async function refreshAutopilot() {
 async function loadExceptions(reset=false) {if(reset) {exceptionOffset=0;$('autopilot-exceptions').replaceChildren();}const page=await api(`/v1/exceptions?limit=50&offset=${exceptionOffset}`);for(const item of page.items) $('autopilot-exceptions').append(el('p',`${item.companyName||'Betrieb'} · ${blockerNames[item.code]||item.code} · ${new Date(item.createdAt).toLocaleDateString('de-DE')}`));exceptionOffset+=page.items.length;$('exceptions-next').disabled=page.items.length<50;}
 async function loadRuns(reset=false) {if(reset) {runOffset=0;$('autopilot-runs').replaceChildren();}const page=await api(`/v1/research/runs?limit=50&offset=${runOffset}`);for(const item of page.items) $('autopilot-runs').append(el('p',`${item.kind} · ${item.status} · ${new Date(item.startedAt).toLocaleString('de-DE')}${item.error?` · ${item.error}`:''}`));runOffset+=page.items.length;$('runs-next').disabled=page.items.length<50;}
 $('exceptions-next').onclick=()=>action(()=>loadExceptions());$('runs-next').onclick=()=>action(()=>loadRuns());
-$('sender-signature-form').onsubmit=event=>{event.preventDefault();action(async()=>{const f=event.target.elements;await api('/v1/sender-signature',{revision:data.senderSignature.revision,signatureText:f.signatureText.value,useLogo:f.useLogo.checked,actor:f.actor.value,confirmation:'SAVE_SHARED_SIGNATURE'});await refresh();note('Zentrale Signatur gespeichert. Alle neuen Entwürfe übernehmen sie; bestehende Nachrichten bleiben unverändert.');});};
+function updateSignaturePreview() {
+  const f=$('sender-signature-form').elements;
+  $('signature-text-preview').textContent=f.signatureText.value;
+  $('signature-logo-preview').src=pendingLogoUrl || logoUrl(data.senderSignature.selectedLogoSha256);
+  $('signature-logo-preview').hidden=!f.useLogo.checked;
+  $('signature-logo-status').textContent=pendingLogoFile
+    ? `${pendingLogoFile.name} · ausgewählt, noch nicht gespeichert.`
+    : 'Hinterlegtes Logo. Zum Ersetzen eine PNG-Datei auswählen und die Signatur speichern.';
+}
+$('signature-logo-file').onchange=event=>action(async()=>{
+  const file=event.target.files[0];
+  if(pendingLogoUrl) URL.revokeObjectURL(pendingLogoUrl);
+  pendingLogoFile=null;pendingLogoUrl=null;
+  if(file && (file.size>500_000 || !file.size || (file.type!=='image/png' && !file.name.toLowerCase().endsWith('.png')))) {
+    event.target.value='';updateSignaturePreview();throw new Error('Bitte eine PNG-Datei mit maximal 500 KB auswählen.');
+  }
+  if(file) {pendingLogoFile=file;pendingLogoUrl=URL.createObjectURL(file);$('sender-signature-form').elements.useLogo.checked=true;}
+  updateSignaturePreview();
+});
+$('sender-signature-form').elements.signatureText.oninput=updateSignaturePreview;
+$('sender-signature-form').elements.useLogo.onchange=updateSignaturePreview;
+$('sender-signature-form').onsubmit=event=>{
+  event.preventDefault();
+  const form=event.target,submit=form.querySelector('button[type="submit"]');
+  action(async()=>{
+    submit.disabled=true;
+    try {
+      const f=form.elements;
+      const payload={revision:data.senderSignature.revision,signatureText:f.signatureText.value,useLogo:f.useLogo.checked,actor:f.actor.value,confirmation:'SAVE_SHARED_SIGNATURE'};
+      if(pendingLogoFile) payload.logoBase64=await new Promise((resolve,reject)=>{
+        const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);
+        reader.onerror=()=>reject(new Error('Logo konnte nicht gelesen werden.'));reader.readAsDataURL(pendingLogoFile);
+      });
+      await api('/v1/sender-signature',payload);await refresh();
+      note('Signatur und Logo gespeichert. Alle neuen Entwürfe übernehmen sie; bestehende Nachrichten bleiben unverändert.');
+    } finally {submit.disabled=false;}
+  });
+};
 $('operator-login').onsubmit=event=> {event.preventDefault();action(async()=>{await api('/local/operator/login',{password:event.target.elements.password.value});event.target.reset();await refresh();note('Betreiberanmeldung erfolgreich. Versand unverändert.');});};
 $('operator-setup').onsubmit=event=> {event.preventDefault();action(async()=>{const fields=event.target.elements;if(fields.password.value!==fields.repeat.value) throw new Error('Die beiden Passwörter stimmen nicht überein.');await api('/local/operator/setup',{password:fields.password.value,confirmation:'CREATE_LOCAL_OPERATOR'});event.target.reset();await refresh();note('Passwort eingerichtet. Jetzt anmelden; vor dem Schattenbetrieb den lokalen Supervisor neu starten. Keine Versandaktivierung.');});};
 $('autopilot-settings').onsubmit=event=> {event.preventDefault();action(async()=>{const f=event.target.elements;await api('/v1/autopilot/configure',{version:autopilotState.settings.version,mode:f.mode.value,researchEnabled:f.researchEnabled.checked,mailboxConnectionId:f.mailboxConnectionId.value.trim()||null,dailyTarget:Number(f.dailyTarget.value),pilotLimit:Number(f.pilotLimit.value),actor:f.actor.value,confirmation:'SAVE_PAUSED_CONFIGURATION'});await refresh();note('Einstellungen gespeichert. Versand bleibt pausiert.');});};

@@ -544,6 +544,16 @@ pre {
   max-width: 100%;
   height: auto;
 }
+.signature-preview {
+  background: white;
+  border: 1px solid #e3e8ec;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 12px 0;
+}
+.signature-preview pre { font-family: Arial, sans-serif; font-size: 14px; line-height: 1.5; }
+#signature-logo-preview { display: block; width: 320px; max-width: 100%; height: auto; }
+#signature-logo-preview[hidden] { display: none; }
 dialog {
   border: 1px solid #dbe3e7;
   border-radius: 12px;

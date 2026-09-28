@@ -40,7 +40,7 @@ export function registerLocalDashboard(
           .header("cache-control", "no-store")
           .header(
             "content-security-policy",
-            "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+            "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
           )
           .type(contentType)
           .send(await readFile(path.resolve("ui", file), "utf8"));

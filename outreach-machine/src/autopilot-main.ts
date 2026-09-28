@@ -21,7 +21,7 @@ await pauseAutopilot(sql,'Runtime startup: reconciliation required','supervisor'
 await sql`UPDATE autopilot_config SET startup_reconciled_at=NULL WHERE singleton`;
 let sync:AutopilotSync|undefined,delivery:AutopilotDelivery|undefined,provider:AutopilotMailProvider|undefined,mailbox:string|undefined;
 if(config.MAIL_PROVIDER==='microsoft_graph') {
-  mailbox=await verifiedMailbox(sql,config);provider=createMailProvider(config) as AutopilotMailProvider;
+  mailbox=await verifiedMailbox(sql,config);provider=createMailProvider(config,sql) as AutopilotMailProvider;
   sync=new AutopilotSync(sql,provider,mailbox,config.GRAPH_SENDER_ADDRESS!);
   delivery=new AutopilotDelivery(sql,config,provider,mailbox);
 }

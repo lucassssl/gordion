@@ -83,6 +83,7 @@ export class MicrosoftGraphMailProvider implements MailProvider {
   private readonly fetchImplementation: typeof fetch;
   private readonly accessStage: "read_only" | "drafts" | "send";
   private readonly liveSendEnabled: boolean;
+  private readonly loadLogo: (sha256:string)=>Promise<{bytes:Buffer;sha256:string}>;
 
   constructor(options: {
     mailboxObjectId: string;
@@ -91,6 +92,7 @@ export class MicrosoftGraphMailProvider implements MailProvider {
     fetchImplementation?: typeof fetch;
     accessStage?: "read_only" | "drafts" | "send";
     liveSendEnabled?: boolean;
+    loadLogo?: (sha256:string)=>Promise<{bytes:Buffer;sha256:string}>;
   }) {
     this.mailboxObjectId = options.mailboxObjectId;
     this.tokenProvider = options.tokenProvider;
@@ -98,10 +100,11 @@ export class MicrosoftGraphMailProvider implements MailProvider {
     this.fetchImplementation = options.fetchImplementation ?? fetch;
     this.accessStage = options.accessStage ?? "read_only";
     this.liveSendEnabled = options.liveSendEnabled ?? false;
+    this.loadLogo = options.loadLogo ?? (async()=>readLogo());
   }
 
   async createDraft(message: OutboundMessage): Promise<ProviderMessage> {
-    const logo = message.logoSha256 ? readLogo() : null;
+    const logo = message.logoSha256 ? await this.loadLogo(message.logoSha256) : null;
     if (logo && logo.sha256 !== message.logoSha256)
       throw new ProviderError({
         code: "logo_changed",
@@ -333,7 +336,7 @@ export class MicrosoftGraphMailProvider implements MailProvider {
   }
 
   async createReplyDraft(parentId:string,message:OutboundMessage):Promise<ProviderMessage> {
-    const logo=message.logoSha256?readLogo():null;
+    const logo=message.logoSha256?await this.loadLogo(message.logoSha256):null;
     if(logo && logo.sha256!==message.logoSha256) throw new Error('logo_changed');
     // One provider write: the caller journals before this request. Any post-creation validation failure is uncertain.
     const result=await this.request<GraphMessage>({method:'POST',url:`${this.userBase()}/messages/${encodeURIComponent(parentId)}/createReplyAll`,safeToRetry:false,acceptedStatuses:[201],html:Boolean(logo),body:{message:{

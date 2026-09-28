@@ -5,6 +5,7 @@ import type { AppConfig } from '../config.js';
 import { autopilotPreflight,pauseAutopilot } from '../services/autopilot-state.js';
 import { CATEGORIES,isEu,renderAutopilot } from '../domain/autopilot.js';
 import { senderSignature,saveSenderSignature } from '../services/sender-signature.js';
+import { InvalidLogo,loadLogoAsset,MAX_LOGO_UPLOAD_BYTES } from '../mail/logo-assets.js';
 
 const paging=z.object({limit:z.coerce.number().int().min(1).max(100).default(50),offset:z.coerce.number().int().min(0).default(0)});
 const actor=z.string().trim().min(2).max(120);
@@ -12,10 +13,16 @@ const text=z.string().trim().min(1).max(10000);
 const template=z.strictObject({categoryId:z.enum(CATEGORIES),language:z.enum(['de','en']),step:z.union([z.literal(0),z.literal(1)]),subject:text.max(255),body:text,signature:z.string().max(4000).optional(),useLogo:z.boolean().optional()});
 export function registerAutopilotRoutes(app:FastifyInstance,sql:Database,config:AppConfig,operator:(r:FastifyRequest)=>boolean) {
   app.get('/v1/sender-signature',async()=>senderSignature(sql));
+  app.get('/v1/sender-signature/logos/:sha256',async(request,reply)=> {
+    const {sha256}=z.object({sha256:z.string().regex(/^[0-9a-f]{64}$/)}).parse(request.params);
+    try {const logo=await loadLogoAsset(sql,sha256);return reply.type('image/png').header('x-content-type-options','nosniff').send(logo.bytes);}
+    catch {return reply.code(404).send({error:'logo_not_found'});}
+  });
   app.post('/v1/sender-signature',async(request,reply)=> {
     if(!operator(request)) return reply.code(403).send({error:'operator_login_required'});
-    const p=z.strictObject({revision:z.number().int().min(0),signatureText:z.string().trim().min(8).max(4000).refine(v=>!/{{|}}|\$\{|[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v)),useLogo:z.boolean(),actor,confirmation:z.literal('SAVE_SHARED_SIGNATURE')}).parse(request.body);
-    const result=await saveSenderSignature(sql,p);
+    const p=z.strictObject({revision:z.number().int().min(0),signatureText:z.string().trim().min(8).max(4000).refine(v=>!/{{|}}|\$\{|[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v)),useLogo:z.boolean(),logoBase64:z.string().min(1).max(Math.ceil(MAX_LOGO_UPLOAD_BYTES/3)*4).optional(),actor,confirmation:z.literal('SAVE_SHARED_SIGNATURE')}).parse(request.body);
+    let result;
+    try {result=await saveSenderSignature(sql,p);} catch(error) {if(error instanceof InvalidLogo) return reply.code(400).send({error:'invalid_logo'});throw error;}
     return result?{saved:true,signature:result,existingMessagesChanged:false}:reply.code(409).send({error:'signature_version_conflict'});
   });
   app.get('/v1/autopilot',async()=> {
