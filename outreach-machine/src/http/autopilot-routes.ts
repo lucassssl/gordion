@@ -6,12 +6,25 @@ import { autopilotPreflight,pauseAutopilot } from '../services/autopilot-state.j
 import { CATEGORIES,isEu,renderAutopilot } from '../domain/autopilot.js';
 import { senderSignature,saveSenderSignature } from '../services/sender-signature.js';
 import { InvalidLogo,loadLogoAsset,MAX_LOGO_UPLOAD_BYTES } from '../mail/logo-assets.js';
+import { legalResearchFor,LEGAL_RESEARCH_VERSION } from '../domain/legal-research.js';
 
 const paging=z.object({limit:z.coerce.number().int().min(1).max(100).default(50),offset:z.coerce.number().int().min(0).default(0)});
 const actor=z.string().trim().min(2).max(120);
 const text=z.string().trim().min(1).max(10000);
-const template=z.strictObject({categoryId:z.enum(CATEGORIES),language:z.enum(['de','en']),step:z.union([z.literal(0),z.literal(1)]),subject:text.max(255),body:text,signature:z.string().max(4000).optional(),useLogo:z.boolean().optional()});
+const template=z.strictObject({categoryId:z.enum(CATEGORIES),language:z.enum(['de','en']),step:z.union([z.literal(0),z.literal(1)]),subject:text.max(255),body:text,signature:z.string().max(4000).optional(),useLogo:z.boolean().optional(),targetingMode:z.enum(['verified_activity','category_only']).default('verified_activity')});
 export function registerAutopilotRoutes(app:FastifyInstance,sql:Database,config:AppConfig,operator:(r:FastifyRequest)=>boolean) {
+  app.get('/v1/autopilot/legal-research',async(request)=> {
+    const p=paging.parse(request.query);
+    const countries=await sql`SELECT co.country_code,count(DISTINCT co.id)::int AS companies,count(ct.id)::int AS contacts,
+      count(ct.id) FILTER(WHERE EXISTS(SELECT 1 FROM outreach_authorizations a JOIN country_send_rules r ON r.id=a.country_rule_id
+        WHERE a.contact_id=ct.id AND a.revoked_at IS NULL AND a.valid_until>now() AND a.prerequisites_verified_at IS NOT NULL
+        AND r.enabled AND r.valid_until>now() AND r.country_code=co.country_code AND r.basis=a.basis))::int AS documented_basis
+      FROM companies co LEFT JOIN contacts ct ON ct.company_id=co.id AND NOT ct.is_test_data
+      GROUP BY co.country_code ORDER BY count(DISTINCT co.id) DESC,co.country_code`;
+    return {version:LEGAL_RESEARCH_VERSION,total:countries.length,limit:p.limit,offset:p.offset,
+      items:countries.slice(p.offset,p.offset+p.limit).map(c=>({...c,research:legalResearchFor(c.countryCode??'')})),
+      notice:'Quellenrecherche ist keine Rechtsberatung oder Versandfreigabe. Dokumentierte Basis ist noch keine vollständige Versandbereitschaft.'};
+  });
   app.get('/v1/sender-signature',async()=>senderSignature(sql));
   app.get('/v1/sender-signature/logos/:sha256',async(request,reply)=> {
     const {sha256}=z.object({sha256:z.string().regex(/^[0-9a-f]{64}$/)}).parse(request.params);
@@ -101,8 +114,8 @@ export function registerAutopilotRoutes(app:FastifyInstance,sql:Database,config:
   app.post('/v1/templates/versions',async(request)=> {
     const p=template.parse(request.body);
     return sql.begin(async tx=> {await tx`SELECT pg_advisory_xact_lock(hashtextextended('gordion-template-seed',0))`;
-      const [result]=await tx`INSERT INTO template_versions(category_id,language,step,version,subject,body,signature,use_logo)
-        SELECT ${p.categoryId},${p.language},${p.step},coalesce(max(version),0)+1,${p.subject},${p.body},'',false FROM template_versions WHERE category_id=${p.categoryId} AND language=${p.language} AND step=${p.step} RETURNING *`;return result;
+      const [result]=await tx`INSERT INTO template_versions(category_id,language,step,version,subject,body,signature,use_logo,targeting_mode)
+        SELECT ${p.categoryId},${p.language},${p.step},coalesce(max(version),0)+1,${p.subject},${p.body},'',false,${p.targetingMode} FROM template_versions WHERE category_id=${p.categoryId} AND language=${p.language} AND step=${p.step} RETURNING *`;return result;
     });
   });
   app.post('/v1/templates/versions/:id/approve',async(request,reply)=> {

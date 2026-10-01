@@ -39,7 +39,20 @@ try {
   const [rule]=await sql`INSERT INTO country_send_rules(country_code,version,basis,prerequisites,reference,reviewed_by,reviewed_at,valid_until,enabled) SELECT 'DE',coalesce(max(version),0)+1,'own_test_address','Only owned test mailbox','test fixture, no legal review','smoke',now(),now()+interval '1 day',true FROM country_send_rules WHERE country_code='DE' AND basis='own_test_address' RETURNING id`;
   const [auth]=await sql`INSERT INTO outreach_authorizations(contact_id,basis,evidence_reference,valid_until,verified_by,country_rule_id,prerequisites_verified_at,prerequisites_verified_by) VALUES(${contact},'own_test_address','simulator fixture',now()+interval '1 day','smoke',${rule!.id},now(),'smoke') RETURNING id`;
   assert.equal((await planAutopilot(sql)).prepared,0,'unapproved templates block');
+  await sql`UPDATE companies SET suitability='unverified' WHERE id=${co}`;
+  await sql`UPDATE template_versions SET targeting_mode='verified_activity' WHERE category_id='broker' AND language='de' AND status='draft'`;
   await sql`UPDATE template_versions SET signature='Test signature',use_logo=false,approved_at=now(),approved_by='smoke',status='approved' WHERE status='draft'`;
+  await seedTemplateLibrary(sql); // Never mutate approved targeting metadata.
+  assert.equal((await planAutopilot(sql)).prepared,0,'strict approved templates still require activity evidence');
+  await sql`UPDATE template_versions SET status='retired' WHERE category_id='broker' AND language='de' AND status='approved'`;
+  await sql`INSERT INTO template_versions(category_id,language,step,version,subject,body,signature,use_logo,targeting_mode,status,approved_at,approved_by)
+    SELECT category_id,language,step,version+1,subject,body,signature,use_logo,'category_only','approved',now(),'smoke' FROM template_versions WHERE category_id='broker' AND language='de' AND status='retired'`;
+  await sql`UPDATE companies SET suitability='conflict' WHERE id=${co}`;
+  assert.equal((await planAutopilot(sql)).prepared,0,'category-only does not override a conflict');
+  await sql`UPDATE companies SET suitability='unverified' WHERE id=${co}`;
+  await sql`UPDATE country_send_rules SET enabled=false WHERE id=${rule!.id}`;
+  assert.equal((await planAutopilot(sql)).prepared,0,'category-only cannot replace a reviewed country rule');
+  await sql`UPDATE country_send_rules SET enabled=true WHERE id=${rule!.id}`;
   // More than one planner page of legally documented but unsuitable roles must
   // not starve a later suitable contact. These are isolated synthetic fixtures.
   for(let i=0;i<26;i++) {
@@ -54,6 +67,7 @@ try {
   assert.equal((await planAutopilot(sql)).prepared,1);
   assert.equal((await planAutopilot(sql)).prepared,0,'repeat planner does not duplicate company');
   const [message]=await sql`SELECT m.* FROM messages m JOIN enrollments e ON e.id=m.enrollment_id WHERE e.company_id=${co}`;
+  assert.equal(message!.snapshot.targetingMode,'category_only');
   assert.equal(message!.countryRuleId,rule!.id);assert.equal(message!.authorizationId,auth!.id);
   assert.equal(message!.senderSignatureVersionId,shared!.id);
   assert.ok(message!.finalBodyText.endsWith(shared!.signatureText));
@@ -96,6 +110,10 @@ try {
   const [paused]=await sql`SELECT paused FROM autopilot_config WHERE singleton`;assert.equal(paused!.paused,true);
   const preflight=await autopilotPreflight(sql,cfg);assert.equal(preflight.ready,false);assert.ok(preflight.blockers.includes('uncertain_provider_operations'));
   const app=buildHttpApp(cfg,sql);
+  const legal=await app.inject({method:'GET',url:'/v1/autopilot/legal-research?limit=1',headers:{'x-admin-api-key':cfg.ADMIN_API_KEY}});
+  assert.equal(legal.statusCode,200);assert.equal(legal.json().items.length,1);assert.equal(legal.json().items[0].research.grantsPermission,false);
+  const forbiddenLegal=await app.inject({method:'GET',url:'/v1/autopilot/legal-research'});
+  assert.equal(forbiddenLegal.statusCode,401);
   const activate=await app.inject({method:'POST',url:'/v1/autopilot/activate',headers:{'x-admin-api-key':cfg.ADMIN_API_KEY},payload:{actor:'test',version:1,confirmation:'ACTIVATE_LIVE_AUTOPILOT'}});
   assert.equal(activate.statusCode,403,'API key/dev session is not an operator login');
   await app.close();

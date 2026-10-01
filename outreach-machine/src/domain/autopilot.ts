@@ -37,6 +37,7 @@ export interface AutopilotContact {
 export interface LibraryTemplate {
   categoryId: Category; language: Language; step: 0 | 1; subject: string; body: string; signature: string;
   useLogo: boolean; logoSha256?: string | null;
+  targetingMode?: 'verified_activity' | 'category_only';
 }
 export const optOut = {
   de: 'Falls Sie keine weitere Kontaktaufnahme wünschen, genügt eine kurze Antwort auf diese E-Mail.',
@@ -57,7 +58,9 @@ export function renderAutopilot(contact: AutopilotContact, template: LibraryTemp
   } else if (first) { salutation = `${de ? 'Guten Tag' : 'Hello'} ${first}${last ? ` ${last}` : ''},`; fallbacks.add('salutation:neutral_personal'); }
   else { salutation = de ? 'Guten Tag,' : 'Hello,'; fallbacks.add('salutation:neutral'); }
   facts.salutation = salutation;
-  const intro = contact.executionIntro?.trim() && contact.introVerifiedAt && contact.introSourceUrl && contact.introLanguage === template.language ? contact.executionIntro.trim() : '';
+  // Category-only outreach introduces our product, never asserts a recipient's
+  // execution activity or regulatory applicability from the category alone.
+  const intro = template.targetingMode !== 'category_only' && contact.executionIntro?.trim() && contact.introVerifiedAt && contact.introSourceUrl && contact.introLanguage === template.language ? contact.executionIntro.trim() : '';
   if (intro) facts.executionIntro = intro;
   else fallbacks.add('executionIntro:neutral');
   const values: Record<string,string | undefined> = {
@@ -99,6 +102,6 @@ export function initialTemplates(): LibraryTemplate[] {
       `{{salutation}}\n\n{{executionIntro}}\n\n${benefits[categoryId].en}\n\nGordion is intended to complement existing trading and settlement systems with a dedicated control and evidence layer. It is designed for deployment within an institution's own infrastructure so that sensitive order data can remain in-house.\n\nA possible starting point would be a narrowly scoped pilot for one liquid instrument class: from reference-data and threshold checks through to an evidence record ready for review and approval.\n\nWould you be open to a 20-minute conversation about whether this approach could be relevant to {{company}}?`) : (de ?
       '{{salutation}}\n\nIch möchte einmal kurz auf meine Nachricht zu Gordion zurückkommen. Wir entwickeln Unterstützung für die strukturierte Prüfung und Dokumentation der Ausführungsqualität.\n\nWäre ein kurzer Austausch für Sie interessant? Falls das Thema bei Ihnen derzeit keine Priorität hat, ist selbstverständlich keine Rückmeldung erforderlich.' :
       '{{salutation}}\n\nI wanted to follow up once on my message about Gordion. We are developing support for structured execution-quality checks and documentation.\n\nWould a short conversation be of interest? If this is not a priority for you at present, there is of course no need to reply.');
-    return { categoryId,language,step,subject,body:`${body}\n\n${optOut[language]}`,signature:'',useLogo:true };
+    return { categoryId,language,step,subject,body:`${body}\n\n${optOut[language]}`,signature:'',useLogo:true,targetingMode:'category_only' as const };
   })));
 }

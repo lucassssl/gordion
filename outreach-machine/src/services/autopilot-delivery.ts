@@ -78,7 +78,8 @@ export class AutopilotDelivery {
       AND ac.mode='live' AND NOT ac.paused AND NOT sc.globally_paused AND ac.startup_reconciled_at IS NOT NULL
       AND mb.tenant_id=${this.config.GRAPH_TENANT_ID!} AND mb.mailbox_object_id=${this.config.GRAPH_MAILBOX_OBJECT_ID!}
       AND mb.last_sync_at>clock_timestamp()-interval '2 minutes' AND NOT EXISTS(SELECT 1 FROM mailbox_folders f LEFT JOIN graph_sync_cursors gc ON gc.mailbox_connection_id=f.mailbox_connection_id AND gc.folder_name=f.provider_id WHERE f.mailbox_connection_id=mb.id AND f.kind<>'ignored' AND (gc.complete IS DISTINCT FROM true OR gc.last_success_at IS NULL OR gc.last_success_at<=clock_timestamp()-interval '2 minutes'))
-      AND e.status='active' AND ct.review_status='eligible' AND co.review_status NOT IN ('rejected','suppressed') AND co.suitability='eligible'
+      AND e.status='active' AND ct.review_status='eligible' AND co.review_status NOT IN ('rejected','suppressed')
+      AND (co.suitability='eligible' OR (co.suitability='unverified' AND t.targeting_mode='category_only' AND m.snapshot->>'targetingMode'='category_only'))
       AND co.researched_at>clock_timestamp()-interval '90 days' AND ct.source_checked_at>clock_timestamp()-interval '90 days' AND ct.dns_valid AND ct.dns_checked_at>clock_timestamp()-interval '30 days'
       AND m.recipient_address=ct.email AND m.approval_content_sha256=m.content_sha256 AND t.status IN ('approved','retired')
       AND a.revoked_at IS NULL AND a.valid_until>clock_timestamp() AND a.prerequisites_verified_at IS NOT NULL

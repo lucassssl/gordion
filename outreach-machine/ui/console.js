@@ -585,7 +585,7 @@ action(async () => {
   await refresh();
 });
 
-let autopilotState=null,libraryVersion=null,exceptionOffset=0,runOffset=0;
+let autopilotState=null,libraryVersion=null,exceptionOffset=0,runOffset=0,legalOffset=0;
 let consoleOffset=0;
 $('load-more-records').onclick=()=>action(async()=> {
   const next=await api(`/v1/console?limit=100&offset=${consoleOffset}`);consoleOffset+=100;
@@ -627,14 +627,29 @@ async function refreshAutopilot() {
   const container=$('autopilot-templates');container.replaceChildren();
   const categoryNames={bank:'Banken',broker:'Broker & Wertpapierfirmen',asset_manager:'Asset Manager',general:'Allgemein'};
   for(const t of templates.items) container.append(button(`${categoryNames[t.categoryId]} · ${t.language.toUpperCase()} · ${t.step?'Nachfrage':'Erstmail'} · v${t.version} · ${labels[t.status]||t.status}`,()=> {
-    libraryVersion=t;const f=$('library-form');for(const key of ['subject','body']) f.elements[key].value=t[key];
+    libraryVersion=t;const f=$('library-form');for(const key of ['subject','body','targetingMode']) f.elements[key].value=t[key];
     $('library-signature-preview').textContent=data.senderSignature.signatureText||'Zentrale Signatur noch nicht hinterlegt.';
     $('library-title').textContent=`${t.categoryId} · ${t.language.toUpperCase()} · ${t.step?'Nachfrage':'Erstmail'}`;
     $('library-status').textContent=`Version ${t.version}: ${labels[t.status]||t.status}. Freigabe gilt ausschließlich für den gespeicherten Inhalt.`;
     $('library-approve').disabled=t.status!=='draft';$('library-dialog').showModal();
   }));
-  await Promise.all([loadExceptions(true),loadRuns(true)]);
+  await Promise.all([loadExceptions(true),loadRuns(true),loadLegalResearch(true)]);
 }
+async function loadLegalResearch(reset=false) {
+  const container=$('legal-research');if(reset) {legalOffset=0;container.replaceChildren();}
+  const page=await api(`/v1/autopilot/legal-research?limit=20&offset=${legalOffset}`);
+  const labels={evidence_required:'Nachweis erforderlich',conditional_b2b_review:'B2B-Sonderweg · Prüfung offen',not_researched:'Noch nicht recherchiert'};
+  for(const item of page.items) {
+    const details=el('details'),r=item.research;
+    details.append(el('summary',`${item.countryCode||'Land fehlt'} · ${item.companies} Firmen · ${item.contacts} Kontakte · ${labels[r.status]}`));
+    details.append(el('p',r.summary),el('p',`${item.documentedBasis} Kontakte mit dokumentierter Länderbasis (keine Versandreife). Quellenstand: ${r.checkedOn||'offen'}.`));
+    const list=el('ul');for(const requirement of r.requirements) list.append(el('li',requirement));details.append(list);
+    for(const source of r.sources) {const link=el('a',source.title);link.href=source.url;link.target='_blank';link.rel='noopener noreferrer';const p=el('p');p.append(link);details.append(p);}
+    container.append(details);
+  }
+  legalOffset+=page.items.length;$('legal-next').disabled=legalOffset>=page.total;
+}
+$('legal-next').onclick=()=>action(()=>loadLegalResearch());
 async function loadExceptions(reset=false) {if(reset) {exceptionOffset=0;$('autopilot-exceptions').replaceChildren();}const page=await api(`/v1/exceptions?limit=50&offset=${exceptionOffset}`);for(const item of page.items) $('autopilot-exceptions').append(el('p',`${item.companyName||'Betrieb'} · ${blockerNames[item.code]||item.code} · ${new Date(item.createdAt).toLocaleDateString('de-DE')}`));exceptionOffset+=page.items.length;$('exceptions-next').disabled=page.items.length<50;}
 async function loadRuns(reset=false) {if(reset) {runOffset=0;$('autopilot-runs').replaceChildren();}const page=await api(`/v1/research/runs?limit=50&offset=${runOffset}`);for(const item of page.items) $('autopilot-runs').append(el('p',`${item.kind} · ${item.status} · ${new Date(item.startedAt).toLocaleString('de-DE')}${item.error?` · ${item.error}`:''}`));runOffset+=page.items.length;$('runs-next').disabled=page.items.length<50;}
 $('exceptions-next').onclick=()=>action(()=>loadExceptions());$('runs-next').onclick=()=>action(()=>loadRuns());
@@ -681,9 +696,9 @@ $('operator-setup').onsubmit=event=> {event.preventDefault();action(async()=>{co
 $('autopilot-settings').onsubmit=event=> {event.preventDefault();action(async()=>{const f=event.target.elements;await api('/v1/autopilot/configure',{version:autopilotState.settings.version,mode:f.mode.value,researchEnabled:f.researchEnabled.checked,mailboxConnectionId:f.mailboxConnectionId.value.trim()||null,dailyTarget:Number(f.dailyTarget.value),pilotLimit:Number(f.pilotLimit.value),actor:f.actor.value,confirmation:'SAVE_PAUSED_CONFIGURATION'});await refresh();note('Einstellungen gespeichert. Versand bleibt pausiert.');});};
 $('autopilot-pause').onclick=()=>action(async()=>{await api('/v1/autopilot/pause',{actor:$('autopilot-settings').elements.actor.value,reason:'Manuelle Pause im Dashboard'});await refresh();});
 $('autopilot-activate').onclick=()=>action(async()=>{if(!confirm('Livebetrieb ausdrücklich aktivieren? Geprüfte Nachrichten können anschließend versendet werden.')) return;await api('/v1/autopilot/activate',{version:autopilotState.settings.version,actor:$('autopilot-settings').elements.actor.value,confirmation:'ACTIVATE_LIVE_AUTOPILOT'});await refresh();});
-$('library-form').onsubmit=event=> {event.preventDefault();action(async()=>{const f=event.target.elements;await api('/v1/templates/versions',{categoryId:libraryVersion.categoryId,language:libraryVersion.language,step:libraryVersion.step,subject:f.subject.value,body:f.body.value});$('library-dialog').close();await refresh();note('Neue Entwurfsversion gespeichert. Noch nicht freigegeben.');});};
+$('library-form').onsubmit=event=> {event.preventDefault();action(async()=>{const f=event.target.elements;await api('/v1/templates/versions',{categoryId:libraryVersion.categoryId,language:libraryVersion.language,step:libraryVersion.step,subject:f.subject.value,body:f.body.value,targetingMode:f.targetingMode.value});$('library-dialog').close();await refresh();note('Neue Entwurfsversion gespeichert. Noch nicht freigegeben.');});};
 $('library-approve').onclick=()=>action(async()=> {
-  const f=$('library-form').elements;if(['subject','body'].some(k=>f[k].value!==libraryVersion[k])) throw new Error('Änderungen zuerst als neue Version speichern und anschließend öffnen.');
-  if(!confirm('Genau diese gespeicherte Vorlage für automatische Vorbereitung freigeben?')) return;
+  const f=$('library-form').elements;if(['subject','body','targetingMode'].some(k=>f[k].value!==libraryVersion[k])) throw new Error('Änderungen zuerst als neue Version speichern und anschließend öffnen.');
+  if(!confirm(libraryVersion.targetingMode==='category_only'?'Neutrale Kategorievorlage freigeben? Bestätige, dass der Text keine unbelegten Pflichten oder Tätigkeiten des Empfängers behauptet. Die Versandgrundlage bleibt separat erforderlich.':'Genau diese gespeicherte Vorlage für automatische Vorbereitung freigeben?')) return;
   await api(`/v1/templates/versions/${libraryVersion.id}/approve`,{actor:$('autopilot-settings').elements.actor.value,confirmation:'APPROVE_TEMPLATE_VERSION'});$('library-dialog').close();await refresh();
 });

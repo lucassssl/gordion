@@ -18,6 +18,10 @@ Implementiert sind Recherche-Queue, ESMA-A2A-Adapter, Websiteprüfung, Vorlagenb
 
 ## Start
 
+Stand 1. Oktober: [Länderrecherche, Kategorieansprache und verbleibende Freigaben](legal-readiness.md). Die 16 neutralen Ausgangsentwürfe können allein anhand der Kategorie gewählt werden, ohne regulatorische Betroffenheit zu behaupten. Kontakt- und Versandprüfung bleiben getrennt.
+
+`npm run local:shadow-check` bindet das bereits konfigurierte Zertifikatspostfach bei pausiertem Betrieb und führt einen vollständigen lesenden Abgleich aus. `npm run local:shadow` hält Oberfläche und Hintergrundabgleich am Laufen. Beide erzwingen lesenden Zugriff; Betreiberanmeldung erforderlich. Keine automatische Freigabe von Vorlagen, Länderregeln oder Betriebsprüfungen.
+
 `npm run local:start` startet PostgreSQL, Migrationen und den Supervisor ausschließlich im Simulator auf `http://127.0.0.1:4310`. Ein offen gehaltenes Browserfenster ist nicht erforderlich. Bestehende Personalisierungsfunktionen bleiben vorhanden.
 
 `npm run autopilot:start` verwendet hingegen die explizite lokale `.env` sowie `.outreach-data/operator.env`. Graph-Laufzeit erst nach geprüfter Konfiguration verwenden. Die alten Graph-Worker-Einstiegspunkte brechen ab, damit niemand die neuen postfachweiten Schranken versehentlich umgeht.

@@ -57,7 +57,8 @@
           <label>Verantwortlicher Betreiber<input name="actor" value="Lucas" required></label>
           <button type="submit">Einstellungen speichern · pausiert</button><button id="autopilot-activate" type="button" class="quiet">Livebetrieb ausdrücklich aktivieren</button>
         </form><p>45 ist das Tagesziel; der Pilot bleibt zunächst auf höchstens 10 beschränkt. Alle Kategorien und Follow-ups teilen ein Budget.</p></article>
-        <article class="panel"><h2>Versionierte Vorlagen</h2><p>Vier Kategorien, Deutsch und Englisch, jeweils Erstmail und eine Nachfrage. Änderungen erzeugen eine neue Version.</p><div id="autopilot-templates"></div></article>
+        <article class="panel"><h2>Versandgrundlagen nach Land</h2><p>Quellenrecherche, keine automatische Freigabe. Einwilligung oder andere passende Nachweise bleiben pro Kontakt erforderlich. Sonderwege müssen gesondert geprüft werden.</p><div id="legal-research"></div><button id="legal-next" class="quiet">Weitere Länder</button></article>
+        <article class="panel"><h2>Versionierte Vorlagen</h2><p>Vier Kategorien, Deutsch und Englisch, jeweils Erstmail und eine Nachfrage. Kategorie genügt für eine neutrale Vorstellung; sie belegt keine regulatorische Betroffenheit. Änderungen erzeugen eine neue Version.</p><div id="autopilot-templates"></div></article>
         <article class="panel"><h2>Klärungsfälle</h2><div id="autopilot-exceptions"></div><button id="exceptions-next" class="quiet">Weitere Klärungsfälle</button></article>
         <article class="panel"><h2>Rechercheläufe</h2><div id="autopilot-runs"></div><button id="runs-next" class="quiet">Weitere Läufe</button></article>
       </section>
@@ -408,6 +409,8 @@
       </footer>
     </main>
     <dialog id="library-dialog"><form id="library-form"><h2 id="library-title">Vorlagenversion</h2>
+      <label>Zielauswahl<select name="targetingMode"><option value="verified_activity">Belegte Ausführungstätigkeit erforderlich</option><option value="category_only">Kategorie genügt · neutrale Vorstellung</option></select></label>
+      <p>Bei „Kategorie genügt“ keine Aussagen über Pflichten oder konkrete Ausführungstätigkeiten des Empfängers im Text verwenden. Firmenspezifische Einstiege werden durch den neutralen Gordion-Einstieg ersetzt. Kontakt- und Versandprüfung bleiben erforderlich.</p>
       <label>Betreff<input name="subject" maxlength="255" required></label>
       <label>Nachricht<textarea name="body" rows="15" required></textarea></label>
       <p>Die zentrale Signatur samt Logo wird beim Erstellen automatisch ergänzt – identisch für alle Sprachen.</p>

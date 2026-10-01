@@ -23,8 +23,11 @@ export async function pauseAutopilot(sql:Database,reason:string,actor:string,man
 export async function seedTemplateLibrary(sql:Database) {
   await sql.begin(async tx=> {
     await tx`SELECT pg_advisory_xact_lock(hashtextextended('gordion-template-seed',0))`;
-    for(const t of initialTemplates()) await tx`INSERT INTO template_versions(category_id,language,step,version,subject,body,signature,use_logo)
-      VALUES(${t.categoryId},${t.language},${t.step},1,${t.subject},${t.body},'',true) ON CONFLICT(category_id,language,step,version) DO NOTHING`;
+    for(const t of initialTemplates()) await tx`INSERT INTO template_versions(category_id,language,step,version,subject,body,signature,use_logo,targeting_mode)
+      VALUES(${t.categoryId},${t.language},${t.step},1,${t.subject},${t.body},'',true,${t.targetingMode!})
+      ON CONFLICT(category_id,language,step,version) DO UPDATE SET targeting_mode=EXCLUDED.targeting_mode
+      WHERE template_versions.status='draft' AND template_versions.subject=EXCLUDED.subject
+        AND template_versions.body=EXCLUDED.body AND template_versions.regulatory_snippet_id IS NULL`;
   });
 }
 export async function verifiedMailbox(sql:Database,config:AppConfig):Promise<string> {

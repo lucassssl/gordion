@@ -8,6 +8,26 @@ const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status}
 const message={idempotencyKey:correlation,recipientAddress:'person@example.org',subject:'Hello',bodyText:'Body'};
 const graphDraft={id:'draft-1',isDraft:true,subject:'Hello',body:{contentType:'text',content:'Body'},toRecipients:[{emailAddress:{address:'person@example.org'}}],ccRecipients:[],bccRecipients:[],singleValueExtendedProperties:[{id:CORRELATION_PROPERTY,value:correlation}]};
 describe('Autopilot Graph contracts',()=> {
+  it('continues real OData nextLink/deltaLink without changing opaque tokens',async()=> {
+    const cursor=`https://graph.microsoft.com/v1.0/users/${mailboxObjectId}/mailFolders('AQMk_example==')/messages/delta?$skiptoken=opaque%2Bvalue`;
+    const delta=cursor.replace('$skiptoken=opaque%2Bvalue','$deltatoken=next%2Bvalue');
+    const fetcher=vi.fn<typeof fetch>().mockResolvedValueOnce(json({value:[],'@odata.deltaLink':delta}));
+    const provider=new MicrosoftGraphMailProvider({mailboxObjectId,tokenProvider,fetchImplementation:fetcher});
+    expect(await provider.getDeltaPage('AQMk_example==',cursor)).toMatchObject({deltaLink:delta});
+    expect(fetcher.mock.calls[0]![0]).toBe(cursor);
+  });
+  it('rejects OData cursor origin/mailbox/operation escapes before any request',async()=> {
+    const root=`https://graph.microsoft.com/v1.0/users/${mailboxObjectId}`;
+    for(const cursor of [
+      `${root}/mailFolders('folder')/messages`,`${root}/mailFolders('folder')/messages/delta/extra`,
+      `${root}/mailFolders('folder')/messages/delta#fragment`,`${root}/mailFolders('folder')/messages/delta`.replace(mailboxObjectId,'other'),
+      `${root}/mailFolders('folder')/messages/delta`.replace('graph.microsoft.com','attacker.example'),
+      `${root}/mailFolders('folder')/messages/delta`.replace('https://','https://user:pass@'),
+    ]) {
+      const fetcher=vi.fn<typeof fetch>();const provider=new MicrosoftGraphMailProvider({mailboxObjectId,tokenProvider,fetchImplementation:fetcher});
+      await expect(provider.getDeltaPage('folder',cursor)).rejects.toMatchObject({code:'unsafe_graph_cursor'});expect(fetcher).not.toHaveBeenCalled();
+    }
+  });
   it('tags creation with the queryable property and a custom header',async()=> {
     const fetcher=vi.fn<typeof fetch>().mockResolvedValueOnce(json(graphDraft,201));
     const provider=new MicrosoftGraphMailProvider({mailboxObjectId,tokenProvider,fetchImplementation:fetcher,accessStage:'drafts'});

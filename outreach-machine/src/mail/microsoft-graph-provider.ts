@@ -419,15 +419,14 @@ export class MicrosoftGraphMailProvider implements MailProvider {
   private assertSafeGraphCursor(value: string): void {
     this.assertSafeMailboxUrl(value);
     const url = new URL(value, GRAPH_BASE);
-    const mailboxSegment = encodeURIComponent(
-      this.mailboxObjectId,
-    ).toLowerCase();
+    const base = `/v1.0/users/${encodeURIComponent(this.mailboxObjectId)}/`;
+    let suffix = '';
+    try { suffix = decodeURIComponent(url.pathname.slice(base.length)); } catch { /* invalid encoding is rejected below */ }
+    // Graph returns both slash and OData key syntax, including for nextLink.
+    // See the official delta-query-messages final response example. Keep the
+    // original opaque URL/token; allow only this mailbox's message-delta path.
     if (
-      url.protocol !== "https:" ||
-      url.hostname !== "graph.microsoft.com" ||
-      !url.pathname
-        .toLowerCase()
-        .startsWith(`/v1.0/users/${mailboxSegment}/mailfolders/`)
+      !/^mailfolders(?:\/[^/'()]+|\('[^/'()]+'\))\/messages\/delta$/i.test(suffix)
     ) {
       throw new ProviderError({
         code: "unsafe_graph_cursor",

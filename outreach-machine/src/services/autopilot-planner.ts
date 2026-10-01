@@ -15,7 +15,7 @@ export async function planAutopilot(sql:Database) {
     if(!campaign) [campaign]=await tx`INSERT INTO campaigns(name,mailbox_connection_id,autopilot,status,timezone,send_window_start,send_window_end,daily_initial_limit,daily_total_limit,followup_workday_offsets,max_followups,legal_review_reference,target_countries)
       VALUES('EU Autopilot',${config.mailboxConnectionId},true,'paused','Europe/Berlin','10:00','16:00',45,50,ARRAY[7]::smallint[],1,'Per-message reviewed authorization and country rule',${[...EU_COUNTRIES]}) RETURNING *`;
     // Follow-up snapshots use the original contact/facts and the version frozen at enrolment.
-    const parents=await tx`SELECT m.*,e.contact_id,e.company_id,e.followup_template_id,ct.language,co.country_code
+    const parents=await tx`SELECT m.*,e.contact_id,e.company_id,e.followup_template_id,ct.language,co.country_code,co.suitability
       FROM messages m JOIN enrollments e ON e.id=m.enrollment_id JOIN campaigns c ON c.id=e.campaign_id
       JOIN contacts ct ON ct.id=e.contact_id JOIN companies co ON co.id=e.company_id
       WHERE c.id=${campaign!.id} AND m.sequence_index=0 AND m.status='sent_confirmed' AND e.status='active'
@@ -26,11 +26,12 @@ export async function planAutopilot(sql:Database) {
       const due=followupDue(parent.sentConfirmedAt); if(due.getTime()>Date.now()) continue;
       const [template]=await tx`SELECT * FROM template_versions WHERE id=${parent.followupTemplateId} AND status IN ('approved','retired')`;
       if(!template) continue;
+      if(!['eligible','unverified'].includes(parent.suitability) || (parent.suitability!=='eligible' && template.targetingMode!=='category_only')) continue;
       const rendered=renderAutopilot(parent.snapshot.contact,{...template,signature:signature.signatureText,useLogo:signature.useLogo} as LibraryTemplate);
       const subject=`Re: ${parent.finalSubject.replace(/^Re:\s*/i,'')}`;
       const hash=contentHash({recipientAddress:parent.recipientAddress,subject,bodyText:rendered.bodyText,logoSha256:signature.logoSha256});
       await tx`INSERT INTO messages(enrollment_id,sequence_index,message_kind,status,recipient_address,final_subject,final_body_text,content_sha256,due_at,approved_at,approved_by,approval_content_sha256,authorization_id,personalization_fallbacks,logo_sha256,template_version_id,country_rule_id,snapshot,parent_message_id,sender_signature_version_id)
-        VALUES(${parent.enrollmentId},1,'followup','approved',${parent.recipientAddress},${subject},${rendered.bodyText},${hash},${due},now(),'autopilot-template-policy',${hash},${parent.authorizationId},${tx.json(rendered.fallbacks)},${signature.logoSha256},${template.id},${parent.countryRuleId},${tx.json({...parent.snapshot,templateVersionId:template.id,templateVersion:template.version,signature:signature.signatureText,signatureVersionId:signature.id,logoSha256:signature.logoSha256,step:1,facts:rendered.facts,fallbacks:rendered.fallbacks} as never)},${parent.id},${signature.id})`;
+        VALUES(${parent.enrollmentId},1,'followup','approved',${parent.recipientAddress},${subject},${rendered.bodyText},${hash},${due},now(),'autopilot-template-policy',${hash},${parent.authorizationId},${tx.json(rendered.fallbacks)},${signature.logoSha256},${template.id},${parent.countryRuleId},${tx.json({...parent.snapshot,targetingMode:template.targetingMode,templateVersionId:template.id,templateVersion:template.version,signature:signature.signatureText,signatureVersionId:signature.id,logoSha256:signature.logoSha256,step:1,facts:rendered.facts,fallbacks:rendered.fallbacks} as never)},${parent.id},${signature.id})`;
       prepared++;
     }
     // SQL excludes ineligible records before batching: UI pagination never limits the eligible population.
@@ -41,9 +42,9 @@ export async function planAutopilot(sql:Database) {
       let afterCreated:string|null=null,afterId:string|null=null;
       const categoryStart=prepared;
       while(prepared-categoryStart<25) {
-      const companies:Array<{id:string;pageCreatedAt:string;countryCode:string;name:string;suitabilityEvidence:unknown}>=await tx`SELECT co.*,co.created_at::text AS page_created_at FROM companies co WHERE co.country_code::text=ANY(${[...EU_COUNTRIES]}::text[])
+      const companies:Array<{id:string;pageCreatedAt:string;countryCode:string;name:string;suitability:string;suitabilityEvidence:unknown}>=await tx`SELECT co.*,co.created_at::text AS page_created_at FROM companies co WHERE co.country_code::text=ANY(${[...EU_COUNTRIES]}::text[])
         AND (${afterCreated}::text IS NULL OR (co.created_at,co.id)>(${afterCreated}::text::timestamptz,${afterId}::uuid))
-        AND co.suitability='eligible' AND co.category_id=${category} AND co.review_status NOT IN ('rejected','suppressed')
+        AND co.suitability IN ('eligible','unverified') AND co.category_id=${category} AND co.review_status NOT IN ('rejected','suppressed')
         AND co.researched_at>now()-interval '90 days' AND co.prior_contact_at IS NULL
         AND NOT EXISTS(SELECT 1 FROM company_outreach_history h WHERE h.company_id=co.id)
         AND NOT EXISTS(SELECT 1 FROM enrollments e WHERE e.company_id=co.id)
@@ -71,12 +72,13 @@ export async function planAutopilot(sql:Database) {
         const language=contactLanguage(company.countryCode,contact.language);
         const templates=await tx`SELECT * FROM template_versions WHERE category_id=${category} AND language=${language} AND status='approved' ORDER BY step`;
         const initial=templates.find(t=>t.step===0),followup=templates.find(t=>t.step===1);if(!initial||!followup) continue;
+        if(company.suitability!=='eligible' && (initial.targetingMode!=='category_only' || followup.targetingMode!=='category_only')) continue;
         try {
           const frozenContact={firstName:contact.firstName,lastName:contact.lastName,honorific:contact.honorific,name:company.name,roleTitle:contact.roleTitle,executionIntro:contact.executionIntro,introSourceUrl:contact.introSourceUrl,introVerifiedAt:contact.introVerifiedAt,introLanguage:contact.introLanguage};
           const rendered=renderAutopilot(frozenContact,{...initial,signature:signature.signatureText,useLogo:signature.useLogo} as LibraryTemplate);
           const hash=contentHash({recipientAddress:contact.email,subject:rendered.subject,bodyText:rendered.bodyText,logoSha256:signature.logoSha256});
           const [enrollment]=await tx`INSERT INTO enrollments(campaign_id,company_id,contact_id,status,followup_template_id) VALUES(${campaign!.id},${company.id},${contact.id},'active',${followup.id}) RETURNING id`;
-          const snapshot={contact:frozenContact,category,language,templateVersionId:initial.id,templateVersion:initial.version,signature:signature.signatureText,signatureVersionId:signature.id,logoSha256:signature.logoSha256,countryRuleId:contact.countryRuleId,sourceUrl:contact.sourceUrl,sourceCheckedAt:contact.sourceCheckedAt,facts:rendered.facts,fallbacks:rendered.fallbacks,suitabilityEvidence:company.suitabilityEvidence};
+          const snapshot={contact:frozenContact,category,language,targetingMode:initial.targetingMode,templateVersionId:initial.id,templateVersion:initial.version,signature:signature.signatureText,signatureVersionId:signature.id,logoSha256:signature.logoSha256,countryRuleId:contact.countryRuleId,sourceUrl:contact.sourceUrl,sourceCheckedAt:contact.sourceCheckedAt,facts:rendered.facts,fallbacks:rendered.fallbacks,suitabilityEvidence:company.suitabilityEvidence};
           await tx`INSERT INTO messages(enrollment_id,sequence_index,message_kind,status,recipient_address,final_subject,final_body_text,content_sha256,due_at,approved_at,approved_by,approval_content_sha256,authorization_id,personalization_fallbacks,logo_sha256,template_version_id,country_rule_id,snapshot,sender_signature_version_id)
             VALUES(${enrollment!.id},0,'initial','approved',${contact.email},${rendered.subject},${rendered.bodyText},${hash},now(),now(),'autopilot-template-policy',${hash},${contact.authorizationId},${tx.json(rendered.fallbacks)},${signature.logoSha256},${initial.id},${contact.countryRuleId},${tx.json(snapshot as never)},${signature.id})`;
           prepared++;

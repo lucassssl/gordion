@@ -25,10 +25,17 @@ describe('Autopilot rendering',()=> {
   });
   it('uses explicit language and EU-only countries',()=>{expect(EU_COUNTRIES).toHaveLength(27);expect(contactLanguage('FR','de')).toBe('de');expect(contactLanguage('AT')).toBe('de');expect(contactLanguage('NL')).toBe('en');expect(()=>contactLanguage('DE','fr')).toThrow();});
   it('never uses raw or wrong-language intros',()=> {
-    const t={...initialTemplates()[0]!,signature:'Team'};
+    const t={...initialTemplates()[0]!,signature:'Team',targetingMode:'verified_activity' as const};
     const c={firstName:'Alex',executionIntro:'SECRET RESEARCH NOTE',introVerifiedAt:new Date(),introSourceUrl:'https://example.org',introLanguage:'en'};
     expect(renderAutopilot(c,t).bodyText).not.toContain('SECRET');
     expect(renderAutopilot({...c,introLanguage:'de'},t).bodyText).toContain('SECRET');
+  });
+  it('category-only templates always ignore firm-specific intros even if previously verified',()=> {
+    for(const template of initialTemplates()) {
+      const result=renderAutopilot({name:'Client AG',executionIntro:'Unsupported client activity claim',introVerifiedAt:new Date(),introSourceUrl:'https://example.org',introLanguage:template.language},{...template,signature:'Sender'});
+      expect(template.targetingMode).toBe('category_only');expect(result.bodyText).not.toContain('Unsupported');
+      expect(result.facts.executionIntro).toBeUndefined();expect(result.fallbacks).toContain('executionIntro:neutral');
+    }
   });
   it('rejects missing signatures and unknown variables',()=>{const t=initialTemplates()[0]!;expect(()=>renderAutopilot({},t)).toThrow();expect(()=>renderAutopilot({},{...t,signature:'Team',subject:'{{unknown}}'})).toThrow();});
   it('prioritizes published roles',()=>{expect(contactRank('CEO','personal')).toBe(1);expect(contactRank('Compliance','personal')).toBe(2);expect(contactRank('CEO','functional')).toBe(4);expect(contactRank('Sales','personal')).toBe(9);});
