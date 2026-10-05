@@ -88,6 +88,8 @@ Am Ende entsteht ein privater, Git-ignorierter HTML-Bericht unter `.outreach-dat
 
 ### Allgemeine Autopilot-Grenzen
 
+`npm run drafts:local-review` erstellt bei pausiertem Betrieb ein privates HTML-/JSON-Prüfpaket für die ersten 100 bereits bearbeiteten Firmen des Kontaktprüflaufs. Es nutzt eine ausschließlich lesende Datenbanktransaktion und die vorhandenen Kategorie-/Sprachvorlagen sowie die zentrale Signatur mit eingefrorenem Logo. Pro Firma wird höchstens ein veröffentlichter, ausreichend zugeordneter und nicht gesperrter Kontakt gewählt; bekannte Erstkontakte und bestehende Sequenzen erhalten keinen Empfänger. Fehlende Kontakte bleiben ausdrücklich leer, statt alte `info@`-Adressen einzusetzen. Die Dateien liegen in einem neuen geschützten Unterverzeichnis von `.outreach-data/`. Dies sind **nur lokale Textvorschauen**, keine Outlook-Entwürfe, Kampagnen oder versandbereiten Queue-Einträge. Freigaben, Nachweise und Tageslimits bleiben unverändert.
+
 - EU27; DE für Deutschland/Österreich, sonst EN; explizite unterstützte Kontaktsprache hat Vorrang.
 - ESMA-Register wöchentlich, Quellenanreicherung regelmäßig. Maximal 100 Firmenprüfungen / 1.000 Abrufe pro Berliner Kalendertag, zehn Websiteabrufe je Firma einschließlich Robots/Weiterleitungen. Aktuell ein Rechercheabruf zur Zeit, also unter der Obergrenze von zwei.
 - Nur Register-/Seed-belegte Websites. Keine geratenen Domains, Adressen oder `info@`-Ersatzkontakte. DNS/MX-Prüfung ist **kein** Nachweis einer existierenden Mailbox.

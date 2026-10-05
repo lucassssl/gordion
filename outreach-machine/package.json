@@ -14,6 +14,7 @@
     "backup:restore-test": "node --env-file-if-exists=.env --import tsx scripts/restore-test.ts",
     "research:import-seed": "node --env-file-if-exists=.env --import tsx scripts/import-seed.ts",
     "research:contact-sites": "node --env-file-if-exists=.env --import tsx scripts/research-contact-sites.ts",
+    "drafts:local-review": "node --env-file-if-exists=.env --import tsx scripts/prepare-local-review-batch.ts",
     "autopilot:worker": "node --env-file-if-exists=.env --import tsx src/autopilot-main.ts",
     "smoke:autopilot": "node --env-file-if-exists=.env --import tsx scripts/smoke-autopilot.ts",
     "smoke:autopilot-faults": "node --env-file-if-exists=.env --import tsx scripts/smoke-autopilot-faults.ts",
