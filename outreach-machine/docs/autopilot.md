@@ -76,6 +76,18 @@ Die Oberfläche speichert Änderungen zunächst pausiert. `/v1/autopilot/preflig
 
 ## Verarbeitung und Sicherheitsregeln
 
+### Bestehende Kontaktfirmen gezielt nachrecherchieren
+
+`npm run research:contact-sites` prüft ausschließlich die bereits im lokalen Kontaktbestand enthaltenen Firmenwebsites. Die lokale Datenbank muss ausdrücklich über `DATABASE_URL` konfiguriert und der Autopilot pausiert sein. Der Befehl importiert keine Registerfirmen, verändert keine Kategorien oder Freigaben und verwendet kein Microsoft Graph.
+
+Der erste Lauf friert seine Firmenliste ein. Ergebnisse, Tageskontingent und Abrufreservierungen bleiben in PostgreSQL erhalten. Wiederholte Starts setzen nur offene Firmen fort; höchstens 100 Firmen und 1.000 Abrufreservierungen pro Berliner Kalendertag, zehn Abrufe je Firma einschließlich Robots/Weiterleitungen, zwei parallele Firmen und mindestens fünf Sekunden pro Domain. Unterbrochene Netzwerkversuche bleiben gegen das Abrufbudget gezählt. Das globale Recherche-Lock verhindert einen gleichzeitigen Lauf des bestehenden Recherche-Workers. Keine selbständige spätere Ausführung: verbleibende Firmen werden erst mit erneutem Start bearbeitet.
+
+Veröffentlichte nicht-generische Adressen werden als Quellenfunde gespeichert. Nur passende Rollen-/Fachadressentreffer mit MX-Nachweis werden als neue oder aktualisierte Kontakte in `needs_review` übernommen. MX ist kein Mailboxnachweis. `info@`, allgemeine Kontaktadressen, Datenschutz-/Presse-/Bewerbungsadressen und fremde Domains sind kein automatischer Ersatz. Widersprüchliche sichtbare Adressen und Mail-Links sowie Datenschutzkontext bleiben ungeprüft. Bestehende geprüfte oder gesperrte Kontakte werden nicht überschrieben. Keine Einwilligungen, Versandfreigaben, Nachrichten oder Sends werden angelegt.
+
+Am Ende entsteht ein privater, Git-ignorierter HTML-Bericht unter `.outreach-data/contact-site-audit-<run-id>.html`. Er unterscheidet zugängliche Websites, technisch blockierte Prüfungen, veröffentlichte Kandidaten und rollenbezogene Kontaktübernahmen; bestehende aktualisierte Kontakte sind keine zusätzlichen Empfänger. `npm run research:contact-sites -- --report-only` erstellt nach Ende des aktiven Laufs ausschließlich den Bericht neu, ohne Websites abzurufen. Nicht-lesbare, PDF- oder nur per JavaScript zugängliche Inhalte gelten nicht als vollständig überprüft.
+
+### Allgemeine Autopilot-Grenzen
+
 - EU27; DE für Deutschland/Österreich, sonst EN; explizite unterstützte Kontaktsprache hat Vorrang.
 - ESMA-Register wöchentlich, Quellenanreicherung regelmäßig. Maximal 100 Firmenprüfungen / 1.000 Abrufe pro Berliner Kalendertag, zehn Websiteabrufe je Firma einschließlich Robots/Weiterleitungen. Aktuell ein Rechercheabruf zur Zeit, also unter der Obergrenze von zwei.
 - Nur Register-/Seed-belegte Websites. Keine geratenen Domains, Adressen oder `info@`-Ersatzkontakte. DNS/MX-Prüfung ist **kein** Nachweis einer existierenden Mailbox.
